@@ -46,7 +46,7 @@ CSS;
           <span class="settings-form__label-text">Target rides</span>
           <span class="settings-form__hint">Number of rides to complete each week.</span>
         </label>
-        <input class="settings-form__input" type="number" name="target_rides" min="1" value="<?= (int) $settings['target_rides'] ?>">
+        <input class="settings-form__input" type="number" name="target_rides" min="1" max="7" value="<?= (int) $settings['target_rides'] ?>">
       </div>
 
       <div class="settings-form__row">
@@ -54,7 +54,7 @@ CSS;
           <span class="settings-form__label-text">Target minutes</span>
           <span class="settings-form__hint">Total riding time to aim for each week.</span>
         </label>
-        <input class="settings-form__input" type="number" name="target_minutes" min="1" value="<?= (int) $settings['target_minutes'] ?>">
+        <input class="settings-form__input" type="number" name="target_minutes" min="1" max="1800" value="<?= (int) $settings['target_minutes'] ?>">
       </div>
 
       <div class="settings-form__row">
@@ -62,7 +62,7 @@ CSS;
           <span class="settings-form__label-text">Minimum weekly minutes</span>
           <span class="settings-form__hint">Below this, only a single easy ride is suggested regardless of ride count.</span>
         </label>
-        <input class="settings-form__input" type="number" name="min_weekly_minutes" min="0" value="<?= (int) $settings['min_weekly_minutes'] ?>">
+        <input class="settings-form__input" type="number" name="min_weekly_minutes" min="0" max="1800" value="<?= (int) $settings['min_weekly_minutes'] ?>">
       </div>
 
       <div class="settings-form__row">
@@ -70,7 +70,7 @@ CSS;
           <span class="settings-form__label-text">Long ride factor</span>
           <span class="settings-form__hint">How much longer the long ride slot is relative to an easy ride (e.g. 1.5 = 50% longer).</span>
         </label>
-        <input class="settings-form__input" type="number" name="long_ride_factor" min="1" step="0.1" value="<?= $settings['long_ride_factor'] ?>">
+        <input class="settings-form__input" type="number" name="long_ride_factor" min="1" max="2.5" step="0.1" value="<?= $settings['long_ride_factor'] ?>">
       </div>
     </div>
 
@@ -82,7 +82,7 @@ CSS;
           <span class="settings-form__label-text">FTP (watts)</span>
           <span class="settings-form__hint">Enables power stream detection. Leave blank to skip.</span>
         </label>
-        <input class="settings-form__input" type="number" name="ftp" min="1" placeholder="—" value="<?= $settings['ftp'] !== null ? (int) $settings['ftp'] : '' ?>">
+        <input class="settings-form__input" type="number" name="ftp" min="1" max="1000" placeholder="—" value="<?= $settings['ftp'] !== null ? (int) $settings['ftp'] : '' ?>">
       </div>
 
       <div class="settings-form__row">
@@ -90,7 +90,7 @@ CSS;
           <span class="settings-form__label-text">Max heart rate (bpm)</span>
           <span class="settings-form__hint">Enables HR stream detection. Leave blank to skip.</span>
         </label>
-        <input class="settings-form__input" type="number" name="max_heartrate" min="1" placeholder="—" value="<?= $settings['max_heartrate'] !== null ? (int) $settings['max_heartrate'] : '' ?>">
+        <input class="settings-form__input" type="number" name="max_heartrate" min="1" max="300" placeholder="—" value="<?= $settings['max_heartrate'] !== null ? (int) $settings['max_heartrate'] : '' ?>">
       </div>
     </div>
 
