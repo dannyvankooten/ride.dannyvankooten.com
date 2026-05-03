@@ -64,17 +64,18 @@ CSS;
       <a class="page-header__link" href="/refresh" title="Fetch fresh data from Strava">
         ↻ <?= $cacheAge > 0 ? 'updated ' . round($cacheAge / 60) . ' min ago' : 'just updated' ?>
       </a>
+      <a class="page-header__link" href="/settings">settings</a>
       <a class="page-header__link" href="/logout">sign out</a>
     </div>
   </div>
 
   <div class="stats">
     <div class="stats__item">
-      <div class="stats__value"><?= $ridesDone ?> / <?= TARGET_RIDES ?></div>
+      <div class="stats__value"><?= $ridesDone ?> / <?= $settings['target_rides'] ?></div>
       <div class="stats__label">rides this week</div>
     </div>
     <div class="stats__item">
-      <div class="stats__value"><?= $minutesDone ?> / <?= TARGET_MINUTES ?></div>
+      <div class="stats__value"><?= $minutesDone ?> / <?= $settings['target_minutes'] ?></div>
       <div class="stats__label">minutes this week</div>
     </div>
     <div class="stats__item">

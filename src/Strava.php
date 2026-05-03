@@ -69,10 +69,10 @@ function getValidTokens(): ?array {
 }
 
 /**
- * Fetch rides from the last 7 days and group them by calendar day.
- * Returns one entry per day with combined time and averaged intensity metrics.
+ * Fetch rides from the last 7 days, classify each one, and group by calendar day.
+ * Returns one entry per day: date, names, moving_time, has_hard, has_long.
  */
-function fetchRides(string $accessToken, int $days = 7): array {
+function fetchRides(string $accessToken, int $days, array $settings): array {
     $after = strtotime("-{$days} days");
     $url   = 'https://www.strava.com/api/v3/athlete/activities?' . http_build_query([
         'after'    => $after,
@@ -97,105 +97,110 @@ function fetchRides(string $accessToken, int $days = 7): array {
     // Filter to bike rides only
     $rides = array_filter($activities, fn($a) => in_array($a['type'] ?? '', ['Ride', 'VirtualRide'], true));
 
-    // Group by calendar day (date portion of start_date_local)
+    // Classify each ride and group by calendar day
     $byDay = [];
     foreach ($rides as $ride) {
         $date = substr($ride['start_date_local'], 0, 10);
 
         if (!isset($byDay[$date])) {
             $byDay[$date] = [
-                'date'              => $date,
-                'names'             => [],
-                'moving_time'       => 0,
-                'hr_readings'       => [],
-                'watts_readings'    => [],
-                'weighted_watts'    => [],
-                'device_watts'      => false,
-                'activity_ids'      => [],
-                'zone_above_z2'     => 0,
-                'zone_total'        => 0,
+                'date'         => $date,
+                'names'        => [],
+                'moving_time'  => 0,
+                'has_hard'     => false,
+                'has_long'     => false,
+                'hr_readings'  => [],
+                'avg_watts'    => [],
+                'device_watts' => false,
             ];
         }
 
-        $byDay[$date]['names'][]             = $ride['name'];
-        $byDay[$date]['activity_ids'][]      = (int) $ride['id'];
-        $byDay[$date]['moving_time']  += (int) ($ride['moving_time'] ?? 0);
+        $byDay[$date]['names'][]      = $ride['name'];
+        $byDay[$date]['moving_time'] += (int) ($ride['moving_time'] ?? 0);
 
         if (!empty($ride['has_heartrate']) && isset($ride['average_heartrate'])) {
             $byDay[$date]['hr_readings'][] = (float) $ride['average_heartrate'];
         }
-
         if (isset($ride['average_watts'])) {
-            $byDay[$date]['watts_readings'][] = (float) $ride['average_watts'];
-        }
-        if (isset($ride['weighted_average_watts'])) {
-            $byDay[$date]['weighted_watts'][] = (float) $ride['weighted_average_watts'];
+            $byDay[$date]['avg_watts'][] = (float) $ride['average_watts'];
         }
         if (!empty($ride['device_watts'])) {
             $byDay[$date]['device_watts'] = true;
         }
+
+        $type = classifyRide($ride, $accessToken, $settings);
+        if ($type['hard']) $byDay[$date]['has_hard'] = true;
+        if ($type['long']) $byDay[$date]['has_long'] = true;
     }
 
-    // Fetch zone distributions for each activity and accumulate per-day totals
-    foreach ($byDay as &$day) {
-        foreach ($day['activity_ids'] as $id) {
-            $zones = fetchActivityFracAboveZ2($accessToken, $id);
-            if ($zones !== null) {
-                $day['zone_above_z2'] += $zones['above_z2'];
-                $day['zone_total']    += $zones['total'];
-            }
-        }
-    }
-    unset($day);
-
-    // Collapse per-day raw readings into averages
-    $result = [];
-    foreach ($byDay as $day) {
-        $result[] = [
-            'date'              => $day['date'],
-            'names'             => $day['names'],
-            'moving_time'       => $day['moving_time'],
-            'avg_heartrate'     => count($day['hr_readings'])     > 0 ? array_sum($day['hr_readings'])     / count($day['hr_readings'])     : null,
-            'avg_watts'         => count($day['watts_readings'])  > 0 ? array_sum($day['watts_readings'])  / count($day['watts_readings'])  : null,
-            'weighted_avg_watts'=> count($day['weighted_watts'])  > 0 ? array_sum($day['weighted_watts'])  / count($day['weighted_watts'])  : null,
-            'device_watts'      => $day['device_watts'],
-            'frac_above_z2'     => $day['zone_total'] > 0 ? $day['zone_above_z2'] / $day['zone_total'] : null,
-        ];
-    }
-
-    // Sort ascending by date
+    // Collapse per-day readings into averages
+    $result = array_values(array_map(function ($day) {
+        $day['avg_heartrate'] = count($day['hr_readings']) > 0
+            ? array_sum($day['hr_readings']) / count($day['hr_readings']) : null;
+        $day['avg_watts'] = count($day['avg_watts']) > 0
+            ? array_sum($day['avg_watts']) / count($day['avg_watts']) : null;
+        unset($day['hr_readings']);
+        return $day;
+    }, $byDay));
     usort($result, fn($a, $b) => strcmp($a['date'], $b['date']));
 
     return $result;
 }
 
 /**
- * Count seconds above the Z2 threshold for a single activity using streams.
- * Prefers power (75% of FTP); falls back to heart rate (75% of MAX_HEARTRATE).
- * Returns ['above_z2' => int, 'total' => int] (seconds), or null if unavailable.
+ * Classify a single ride as hard and/or long.
+ *
+ * Hard detection tiers (first match wins):
+ *   1. Per-second power stream: >50% of seconds above 75% FTP
+ *   2. Weighted average power: weighted_average_watts / FTP > 0.75
+ *   3. Per-second HR stream: >50% of seconds above 75% max HR
+ *   4. Average HR: average_heartrate / MAX_HEARTRATE > 0.75
+ *   5. Workout type tag: race (11) or workout (12)
+ *
+ * Long: moving_time >= 85 minutes.
  */
-function fetchActivityFracAboveZ2(string $accessToken, int $activityId): ?array {
-    if (FTP !== null) {
-        $data = fetchActivityStream($accessToken, $activityId, 'watts');
-        if ($data !== null) {
-            $threshold = 0.75 * FTP;
-            $total     = count($data);
-            $aboveZ2   = count(array_filter($data, fn($w) => $w > $threshold));
-            return $total > 0 ? ['above_z2' => $aboveZ2, 'total' => $total] : null;
+function classifyRide(array $ride, string $accessToken, array $settings): array {
+    $ftp    = $settings['ftp'];
+    $maxHr  = $settings['max_heartrate'];
+    $long   = ($ride['moving_time'] ?? 0) >= $settings['long_ride_factor']
+        * ($settings['target_minutes'] / ($settings['target_rides'] - 1 + $settings['long_ride_factor'])) * 60;
+    $id     = (int) $ride['id'];
+
+    // Tier 1: per-second power stream
+    if ($ftp !== null) {
+        $watts = fetchActivityStream($accessToken, $id, 'watts');
+        if ($watts !== null && count($watts) > 0) {
+            $hard = count(array_filter($watts, fn($w) => $w > 0.80 * $ftp)) > 1800
+                 || count(array_filter($watts, fn($w) => $w > 0.90 * $ftp)) > 1200
+                 || count(array_filter($watts, fn($w) => $w > 1.00 * $ftp)) >  600;
+            return ['hard' => $hard, 'long' => $long];
         }
     }
 
-    if (MAX_HEARTRATE !== null) {
-        $data = fetchActivityStream($accessToken, $activityId, 'heartrate');
-        if ($data !== null) {
-            $threshold = 0.75 * MAX_HEARTRATE;
-            $total     = count($data);
-            $aboveZ2   = count(array_filter($data, fn($hr) => $hr > $threshold));
-            return $total > 0 ? ['above_z2' => $aboveZ2, 'total' => $total] : null;
+    // Tier 2: weighted average power / FTP
+    if ($ftp !== null && isset($ride['weighted_average_watts'])) {
+        return ['hard' => ($ride['weighted_average_watts'] / $ftp) > 0.75, 'long' => $long];
+    }
+
+    // Tier 3: per-second HR stream
+    if ($maxHr !== null) {
+        $hr = fetchActivityStream($accessToken, $id, 'heartrate');
+        if ($hr !== null && count($hr) > 0) {
+            $hard = count(array_filter($hr, fn($h) => $h > 0.80 * $maxHr)) > 1200
+                 || count(array_filter($hr, fn($h) => $h > 0.85 * $maxHr)) >  600
+                 || count(array_filter($hr, fn($h) => $h > 0.90 * $maxHr)) >  300;
+            return ['hard' => $hard, 'long' => $long];
         }
     }
 
-    return null;
+    // Tier 4: average heartrate / max HR
+    if ($maxHr !== null && !empty($ride['has_heartrate']) && isset($ride['average_heartrate'])) {
+        return ['hard' => ($ride['average_heartrate'] / $maxHr) > 0.75, 'long' => $long];
+    }
+
+    // Tier 5: workout type tag (race=11, workout=12)
+    $wt = $ride['workout_type'] ?? null;
+    return ['hard' => ($wt === 11 || $wt === 12), 'long' => $long];
 }
 
 /**

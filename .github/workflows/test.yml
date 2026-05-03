@@ -1,0 +1,21 @@
+name: Test
+
+on: [ push, pull_request ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup PHP
+        id: setup-php
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 'highest'
+
+      - name: Check PHP syntax
+        run: find . -name '*.php' -not -path './vendor/*' -not -path './node_modules/*' -not -path './var/*' -print0 | xargs -0 -n1 php --define error_reporting=-1 -l
+
+      - name: Run tests
+        run:  php tests/suggest_test.php

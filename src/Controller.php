@@ -18,6 +18,7 @@ class Controller
                 '/callback' => $this->callback(),
                 '/logout'   => $this->logout(),
                 '/refresh'  => $this->refresh(),
+                '/settings' => $this->settings(),
                 default     => $this->index(),
             };
         } catch (\Exception $e) {
@@ -74,12 +75,13 @@ class Controller
 
     private function renderDashboard(string $accessToken, bool $forceRefresh = false): void
     {
-        [$allRides, $cacheAge] = $this->loadRides($accessToken, $forceRefresh);
+        $settings = loadSettings();
+        [$allRides, $cacheAge] = $this->loadRides($accessToken, $forceRefresh, $settings);
 
         $cutoff    = date('Y-m-d', strtotime('-7 days'));
         $weekRides = array_values(array_filter($allRides, fn($r) => $r['date'] >= $cutoff));
 
-        $result      = suggest($weekRides);
+        $result      = suggest($weekRides, $settings);
         $complete    = !empty($result['_complete']);
         $warning     = $result['_warning'] ?? null;
         $suggestions = $result['suggestions'];
@@ -103,7 +105,30 @@ class Controller
             'hasHard'     => $hasHard,
             'hasLong'     => $hasLong,
             'colors'      => self::BADGE_COLORS,
+            'settings'    => $settings,
         ]);
+    }
+
+    private function settings(): void
+    {
+        $tokens = getValidTokens();
+        if ($tokens === null) { header('Location: /'); exit; }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            saveSettings([
+                'target_rides'       => max(1,   (int)   ($_POST['target_rides']       ?? 4)),
+                'target_minutes'     => max(1,   (int)   ($_POST['target_minutes']     ?? 300)),
+                'long_ride_factor'   => max(1.0, (float) ($_POST['long_ride_factor']   ?? 1.5)),
+                'min_weekly_minutes' => max(0,   (int)   ($_POST['min_weekly_minutes'] ?? 150)),
+                'ftp'           => ($_POST['ftp']           ?? '') !== '' ? max(1, (int) $_POST['ftp'])           : null,
+                'max_heartrate' => ($_POST['max_heartrate'] ?? '') !== '' ? max(1, (int) $_POST['max_heartrate']) : null,
+            ]);
+            if (file_exists($this->cacheFile())) unlink($this->cacheFile());
+            header('Location: /settings');
+            exit;
+        }
+
+        $this->render('settings', ['settings' => loadSettings()]);
     }
 
     private function renderError(string $message): void
@@ -134,7 +159,7 @@ class Controller
     }
 
     /** Returns [rides[], cacheAgeSeconds] */
-    private function loadRides(string $accessToken, bool $forceRefresh = false): array
+    private function loadRides(string $accessToken, bool $forceRefresh, array $settings): array
     {
         $cached = null;
 
@@ -149,7 +174,7 @@ class Controller
             return [$cached['rides'], time() - $cached['ts']];
         }
 
-        $rides = fetchRides($accessToken, 21);
+        $rides = fetchRides($accessToken, 21, $settings);
         file_put_contents($this->cacheFile(), json_encode(['ts' => time(), 'rides' => $rides]));
         return [$rides, 0];
     }

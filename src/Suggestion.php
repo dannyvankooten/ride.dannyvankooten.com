@@ -8,7 +8,7 @@
  *   duration    => int (minutes)
  *   description => string
  */
-function suggest(array $dayRides): array {
+function suggest(array $dayRides, array $settings): array {
     $ridesDone   = count($dayRides);
     $timeDoneMin = array_sum(array_column($dayRides, 'moving_time')) / 60;
 
@@ -17,7 +17,7 @@ function suggest(array $dayRides): array {
 
     // Build the list of remaining slot types (priority: hard → long → easy)
     $remainingSlots = [];
-    $remainingCount = max(0, TARGET_RIDES - $ridesDone);
+    $remainingCount = max(0, $settings['target_rides'] - $ridesDone);
 
     if (!$hasHardRide && $remainingCount > 0) {
         $remainingSlots[] = 'hard';
@@ -32,32 +32,28 @@ function suggest(array $dayRides): array {
         $remainingCount--;
     }
 
+    // Exception: if below the weekly minimum, ignore the ride structure —
+    // just suggest enough riding to reach the minimum.
+    if ($timeDoneMin < $settings['min_weekly_minutes']) {
+        $gap = (int) ceil($settings['min_weekly_minutes'] - $timeDoneMin);
+        return [
+            '_complete'   => false,
+            'suggestions' => [[
+                'type'        => 'easy',
+                'duration'    => $gap,
+                'description' => 'Steady zone 2 effort to meet the weekly minimum.',
+            ]],
+        ];
+    }
+
     if (empty($remainingSlots)) {
-        // All 4 days done — check the 150 min floor
-        if ($timeDoneMin < MIN_WEEKLY_MINUTES) {
-            $gap = (int) ceil(MIN_WEEKLY_MINUTES - $timeDoneMin);
-            return [
-                '_warning' => "You've completed all 4 ride days but only logged " . round($timeDoneMin) . " min. Add at least {$gap} more min to hit the weekly minimum.",
-                'suggestions' => [[
-                    'type'        => 'easy',
-                    'duration'    => $gap,
-                    'description' => 'Steady zone 2 effort to meet the weekly minimum.',
-                ]],
-            ];
-        }
         return ['_complete' => true, 'suggestions' => []];
     }
 
     // Distribute remaining minutes across remaining slots
-    $remainingMin = max(0.0, (float) TARGET_MINUTES - $timeDoneMin);
+    $remainingMin = max(0.0, (float) $settings['target_minutes'] - $timeDoneMin);
 
-    // Ensure total for the week won't fall below MIN_WEEKLY_MINUTES
-    $projectedTotal = $timeDoneMin + $remainingMin;
-    if ($projectedTotal < MIN_WEEKLY_MINUTES) {
-        $remainingMin = (float) MIN_WEEKLY_MINUTES - $timeDoneMin;
-    }
-
-    $durations = distributeDurations($remainingSlots, $remainingMin);
+    $durations = distributeDurations($remainingSlots, $remainingMin, $settings);
 
     $suggestions = [];
     foreach ($remainingSlots as $i => $type) {
@@ -71,14 +67,8 @@ function suggest(array $dayRides): array {
     return ['_complete' => false, 'suggestions' => $suggestions];
 }
 
-/**
- * Distribute $totalMinutes across $slots respecting the long/easy ratio.
- * Long ride is LONG_RIDE_FACTOR × an easy slot. Hard ride is the same as easy.
- * Returns array of int minutes, one per slot.
- */
-function distributeDurations(array $slots, float $totalMinutes): array {
-    // Each easy/hard slot = 1 unit; long slot = LONG_RIDE_FACTOR units
-    $units = array_map(fn($s) => $s === 'long' ? LONG_RIDE_FACTOR : 1.0, $slots);
+function distributeDurations(array $slots, float $totalMinutes, array $settings): array {
+    $units = array_map(fn($s) => $s === 'long' ? $settings['long_ride_factor'] : 1.0, $slots);
     $totalUnits = array_sum($units);
 
     if ($totalUnits <= 0) {
@@ -91,43 +81,16 @@ function distributeDurations(array $slots, float $totalMinutes): array {
 
 function detectLongRide(array $dayRides): bool {
     foreach ($dayRides as $day) {
-        if ($day['moving_time'] >= 85 * 60) {
-            return true;
-        }
+        if ($day['has_long'] ?? false) return true;
     }
     return false;
 }
 
 function detectHardRide(array $dayRides): bool {
-    if (count($dayRides) === 0) {
-        return false;
+    foreach ($dayRides as $day) {
+        if ($day['has_hard'] ?? false) return true;
     }
-
-    // --- Zone-based detection (preferred): >50% of ride time above zone 2 ---
-    $zoneDays = array_filter($dayRides, fn($d) => ($d['frac_above_z2'] ?? null) !== null);
-    if (count($zoneDays) > 0) {
-        foreach ($zoneDays as $day) {
-            if ($day['frac_above_z2'] > 0.50) {
-               
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // --- Heart-rate fallback ---
-    $hrDays = array_filter($dayRides, fn($d) => $d['avg_heartrate'] !== null);
-    if (count($hrDays) < 1) {
-        // No data available; cannot detect — assume not done
-        return false;
-    }
-
-    $hrs  = array_column(array_values($hrDays), 'avg_heartrate');
-    $mean = array_sum($hrs) / count($hrs);
-    $maxHr = max($hrs);
-
-    // Flag as hard if the highest-HR day is >= 10% above the mean
-    return $maxHr >= $mean * 1.10;
+    return false;
 }
 
 function rideDescription(string $type): string {

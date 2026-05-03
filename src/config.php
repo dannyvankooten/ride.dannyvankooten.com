@@ -11,13 +11,26 @@ function tokensFile(): string {
     return varDir() . 'tokens.json';
 }
 
-define('TARGET_RIDES', 4);
-define('TARGET_MINUTES', 300);
-define('LONG_RIDE_FACTOR', 1.5);
-define('MIN_WEEKLY_MINUTES', 150);
+const SETTINGS_DEFAULTS = [
+    'target_rides'       => 4,
+    'target_minutes'     => 300,
+    'long_ride_factor'   => 1.5,
+    'min_weekly_minutes' => 150,
+    'ftp'                => null,
+    'max_heartrate'      => null,
+];
 
-// Set these to enable accurate hard-ride detection via streams.
-// FTP is used when available; MAX_HEARTRATE is the fallback.
-// A ride is hard if more than 75% of its seconds exceed 75% of FTP (or max HR).
-define('FTP', 238);           // e.g. 250
-define('MAX_HEARTRATE', 195); // e.g. 185
+function settingsFile(): string { return varDir() . 'settings.json'; }
+
+function loadSettings(): array {
+    $file  = settingsFile();
+    $saved = file_exists($file) ? json_decode(file_get_contents($file), true) : [];
+    return array_merge(SETTINGS_DEFAULTS, is_array($saved) ? $saved : []);
+}
+
+function saveSettings(array $s): void {
+    $file = settingsFile();
+    $dir  = dirname($file);
+    if (!is_dir($dir)) mkdir($dir, 0700, true);
+    file_put_contents($file, json_encode($s));
+}
