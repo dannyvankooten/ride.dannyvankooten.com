@@ -57,15 +57,7 @@ CSS;
         <input class="settings-form__input" type="number" name="target_minutes" min="0" max="1800" step="15" value="<?= (int) $settings['target_minutes'] ?>">
       </div>
 
-      <div class="settings-form__row">
-        <label class="settings-form__label">
-          <span class="settings-form__label-text">Weekly floor</span>
-          <span class="settings-form__hint">If you haven't ridden at all in 7 days, you'll be asked to ride easy for this long to get moving again and prevent detraining. Typically half your target.</span>
-        </label>
-        <input class="settings-form__input" type="number" name="min_weekly_minutes" min="0" max="1800" step="15" value="<?= (int) $settings['min_weekly_minutes'] ?>">
-      </div>
-
-      <div class="settings-form__row">
+<div class="settings-form__row">
         <label class="settings-form__label">
           <span class="settings-form__label-text">Long ride factor</span>
           <span class="settings-form__hint">How much longer the long ride slot is relative to an easy ride (e.g. 1.5 = 50% longer).</span>

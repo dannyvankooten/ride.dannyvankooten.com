@@ -32,18 +32,27 @@ function suggest(array $dayRides, array $settings): array {
         $remainingCount--;
     }
 
-    // Exception: no rides at all in 7 days — skip structure, just get moving.
+    // Exception: no rides at all in 7 days — suggest one long easy ride to get moving.
     if ($ridesDone === 0) {
-        $gap = (int) ceil($settings['min_weekly_minutes'] - $timeDoneMin);
+        $duration = (int) round(
+            $settings['long_ride_factor'] * $settings['target_minutes']
+            / ($settings['target_rides'] - 1 + $settings['long_ride_factor'])
+        );
         return [[
-            'type'        => 'easy',
-            'duration'    => $gap,
-            'description' => 'Steady zone 2 effort to meet the weekly minimum.',
+            'type'        => 'long',
+            'duration'    => $duration,
+            'description' => rideDescription('long'),
         ]];
     }
 
     if (empty($remainingSlots)) {
-        return [];
+        $gap = (int) round($settings['target_minutes'] - $timeDoneMin);
+        if ($gap <= 0) return [];
+        return [[
+            'type'        => 'easy',
+            'duration'    => $gap,
+            'description' => rideDescription('easy'),
+        ]];
     }
 
     // Distribute remaining minutes across remaining slots

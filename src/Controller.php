@@ -114,10 +114,9 @@ class Controller
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             saveSettings([
-                'target_rides'       => min(7,    max(1,   (int)   ($_POST['target_rides']       ?? 4))),
-                'target_minutes'     => min(1800, max(1,   (int)   ($_POST['target_minutes']     ?? 300))),
-                'long_ride_factor'   => min(2.5,  max(1.0, (float) ($_POST['long_ride_factor']   ?? 1.5))),
-                'min_weekly_minutes' => min(1800, max(0,   (int)   ($_POST['min_weekly_minutes'] ?? 150))),
+                'target_rides'     => min(7,    max(1,   (int)   ($_POST['target_rides']     ?? 4))),
+                'target_minutes'   => min(1800, max(1,   (int)   ($_POST['target_minutes']   ?? 300))),
+                'long_ride_factor' => min(2.5,  max(1.0, (float) ($_POST['long_ride_factor'] ?? 1.5))),
                 'ftp'           => ($_POST['ftp']           ?? '') !== '' ? min(1000, max(1, (int) $_POST['ftp']))           : null,
                 'max_heartrate' => ($_POST['max_heartrate'] ?? '') !== '' ? min(300,  max(1, (int) $_POST['max_heartrate'])) : null,
             ]);
