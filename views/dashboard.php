@@ -92,10 +92,6 @@ CSS;
   <div class="banner banner--complete">Week complete — all goals reached!</div>
   <?php else: ?>
 
-  <?php if ($warning): ?>
-  <div class="banner banner--warning"><?= htmlspecialchars($warning) ?></div>
-  <?php endif; ?>
-
   <?php if ($suggestions): ?>
   <h2>Suggested workouts</h2>
   <div class="suggestions">

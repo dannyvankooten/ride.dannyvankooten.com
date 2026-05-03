@@ -82,10 +82,8 @@ class Controller
         $cutoff    = date('Y-m-d', strtotime('-7 days'));
         $weekRides = array_values(array_filter($allRides, fn($r) => $r['date'] >= $cutoff));
 
-        $result      = suggest($weekRides, $settings);
-        $complete    = !empty($result['_complete']);
-        $warning     = $result['_warning'] ?? null;
-        $suggestions = $result['suggestions'];
+        $suggestions = suggest($weekRides, $settings);
+        $complete    = empty($suggestions);
 
         $ridesDone   = count($weekRides);
         $minutesDone = (int) round(array_sum(array_column($weekRides, 'moving_time')) / 60);
@@ -99,7 +97,6 @@ class Controller
             'cacheAge'    => $cacheAge,
             'weekRides'   => $weekRides,
             'complete'    => $complete,
-            'warning'     => $warning,
             'suggestions' => $suggestions,
             'ridesDone'   => $ridesDone,
             'minutesDone' => $minutesDone,

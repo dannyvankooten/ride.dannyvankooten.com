@@ -41,13 +41,13 @@ check($r['suggestions'][0]['type'] === 'easy', 'type is easy');
 check($r['suggestions'][0]['duration'] === 150,'duration = full 150 min minimum');
 
 // ------------------------------------------------------------
-// 2. Some rides done but still below minimum
+// 2. Some rides done but below floor → normal structure applies (floor only fires on 0 rides)
 // ------------------------------------------------------------
-echo "\nbelow minimum despite rides done\n";
-$r = suggest([day(1800), day(1800)], $s); // 2 × 30 min = 60 min
+echo "\nbelow floor but rides done — normal structure\n";
+$r = suggest([day(1800), day(1800)], $s); // 2 × 30 min = 60 min, below 150 min floor
 check($r['_complete'] === false,               'not complete');
-check(count($r['suggestions']) === 1,          'one suggestion');
-check($r['suggestions'][0]['duration'] === 90, 'gap is 90 min');
+check(count($r['suggestions']) === 2,          'two suggestions (remaining slots, not floor override)');
+check($r['suggestions'][0]['type'] === 'hard', 'first slot is hard');
 
 // ------------------------------------------------------------
 // 3. All 4 rides done with enough time → complete

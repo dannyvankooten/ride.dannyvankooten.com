@@ -54,15 +54,15 @@ CSS;
           <span class="settings-form__label-text">Target minutes</span>
           <span class="settings-form__hint">Total riding time to aim for each week.</span>
         </label>
-        <input class="settings-form__input" type="number" name="target_minutes" min="1" max="1800" value="<?= (int) $settings['target_minutes'] ?>">
+        <input class="settings-form__input" type="number" name="target_minutes" min="0" max="1800" step="15" value="<?= (int) $settings['target_minutes'] ?>">
       </div>
 
       <div class="settings-form__row">
         <label class="settings-form__label">
-          <span class="settings-form__label-text">Minimum weekly minutes</span>
-          <span class="settings-form__hint">Below this, only a single easy ride is suggested regardless of ride count.</span>
+          <span class="settings-form__label-text">Weekly floor</span>
+          <span class="settings-form__hint">If you haven't ridden at all in 7 days, you'll be asked to ride easy for this long to get moving again and prevent detraining. Typically half your target.</span>
         </label>
-        <input class="settings-form__input" type="number" name="min_weekly_minutes" min="0" max="1800" value="<?= (int) $settings['min_weekly_minutes'] ?>">
+        <input class="settings-form__input" type="number" name="min_weekly_minutes" min="0" max="1800" step="15" value="<?= (int) $settings['min_weekly_minutes'] ?>">
       </div>
 
       <div class="settings-form__row">
@@ -80,7 +80,7 @@ CSS;
       <div class="settings-form__row">
         <label class="settings-form__label">
           <span class="settings-form__label-text">FTP (watts)</span>
-          <span class="settings-form__hint">Enables power stream detection. Leave blank to skip.</span>
+          <span class="settings-form__hint">Used to detect hard workouts by power. Leave blank to disable.</span>
         </label>
         <input class="settings-form__input" type="number" name="ftp" min="1" max="1000" placeholder="—" value="<?= $settings['ftp'] !== null ? (int) $settings['ftp'] : '' ?>">
       </div>
@@ -88,7 +88,7 @@ CSS;
       <div class="settings-form__row">
         <label class="settings-form__label">
           <span class="settings-form__label-text">Max heart rate (bpm)</span>
-          <span class="settings-form__hint">Enables HR stream detection. Leave blank to skip.</span>
+          <span class="settings-form__hint">Used to detect hard workouts by heart rate. Leave blank to disable.</span>
         </label>
         <input class="settings-form__input" type="number" name="max_heartrate" min="1" max="300" placeholder="—" value="<?= $settings['max_heartrate'] !== null ? (int) $settings['max_heartrate'] : '' ?>">
       </div>
