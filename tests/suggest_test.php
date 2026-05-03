@@ -31,31 +31,30 @@ $s = [
 ];
 
 // ------------------------------------------------------------
-// 1. Empty week — below minimum floor → single easy gap
+// 1. Empty week → single easy gap (floor)
 // ------------------------------------------------------------
 echo "empty week (min-floor)\n";
 $r = suggest([], $s);
-check($r['_complete'] === false,               'not complete');
-check(count($r['suggestions']) === 1,          'one suggestion');
-check($r['suggestions'][0]['type'] === 'easy', 'type is easy');
-check($r['suggestions'][0]['duration'] === 150,'duration = full 150 min minimum');
+check(!empty($r),                      'not complete');
+check(count($r) === 1,                 'one suggestion');
+check($r[0]['type'] === 'easy',        'type is easy');
+check($r[0]['duration'] === 150,       'duration = full 150 min minimum');
 
 // ------------------------------------------------------------
-// 2. Some rides done but below floor → normal structure applies (floor only fires on 0 rides)
+// 2. Below floor but rides done → normal structure (floor only fires on 0 rides)
 // ------------------------------------------------------------
 echo "\nbelow floor but rides done — normal structure\n";
-$r = suggest([day(1800), day(1800)], $s); // 2 × 30 min = 60 min, below 150 min floor
-check($r['_complete'] === false,               'not complete');
-check(count($r['suggestions']) === 2,          'two suggestions (remaining slots, not floor override)');
-check($r['suggestions'][0]['type'] === 'hard', 'first slot is hard');
+$r = suggest([day(1800), day(1800)], $s); // 2 × 30 min = 60 min
+check(!empty($r),                      'not complete');
+check(count($r) === 2,                 'two suggestions (remaining slots, not floor override)');
+check($r[0]['type'] === 'hard',        'first slot is hard');
 
 // ------------------------------------------------------------
-// 3. All 4 rides done with enough time → complete
+// 3. All 4 rides done → complete
 // ------------------------------------------------------------
 echo "\nweek complete\n";
 $r = suggest([day(4800), day(4800), day(4800), day(4800)], $s); // 4 × 80 min = 320 min
-check($r['_complete'] === true,               'complete');
-check(count($r['suggestions']) === 0,          'no suggestions');
+check(empty($r),                       'complete');
 
 // ------------------------------------------------------------
 // 4. 1 ride done (160 min), no hard, no long → hard + long + easy
@@ -64,14 +63,14 @@ check(count($r['suggestions']) === 0,          'no suggestions');
 // ------------------------------------------------------------
 echo "\n1 ride done — all three slots needed\n";
 $r = suggest([day(9600)], $s); // 160 min
-check($r['_complete'] === false,               'not complete');
-check(count($r['suggestions']) === 3,          'three suggestions');
-check($r['suggestions'][0]['type'] === 'hard', 'first slot is hard');
-check($r['suggestions'][1]['type'] === 'long', 'second slot is long');
-check($r['suggestions'][2]['type'] === 'easy', 'third slot is easy');
-check($r['suggestions'][0]['duration'] === 40, 'hard duration');
-check($r['suggestions'][1]['duration'] === 60, 'long duration (1.5×)');
-check($r['suggestions'][2]['duration'] === 40, 'easy duration');
+check(!empty($r),                      'not complete');
+check(count($r) === 3,                 'three suggestions');
+check($r[0]['type'] === 'hard',        'first slot is hard');
+check($r[1]['type'] === 'long',        'second slot is long');
+check($r[2]['type'] === 'easy',        'third slot is easy');
+check($r[0]['duration'] === 40,        'hard duration');
+check($r[1]['duration'] === 60,        'long duration (1.5×)');
+check($r[2]['duration'] === 40,        'easy duration');
 
 // ------------------------------------------------------------
 // 5. Has hard, 2 rides (160 min) → long + easy
@@ -80,11 +79,11 @@ check($r['suggestions'][2]['duration'] === 40, 'easy duration');
 // ------------------------------------------------------------
 echo "\nhas hard — long + easy remaining\n";
 $r = suggest([day(4800, true), day(4800)], $s); // 2 × 80 min, first is hard
-check(count($r['suggestions']) === 2,          'two suggestions');
-check($r['suggestions'][0]['type'] === 'long', 'first slot is long');
-check($r['suggestions'][1]['type'] === 'easy', 'second slot is easy');
-check($r['suggestions'][0]['duration'] === 84, 'long duration');
-check($r['suggestions'][1]['duration'] === 56, 'easy duration');
+check(count($r) === 2,                 'two suggestions');
+check($r[0]['type'] === 'long',        'first slot is long');
+check($r[1]['type'] === 'easy',        'second slot is easy');
+check($r[0]['duration'] === 84,        'long duration');
+check($r[1]['duration'] === 56,        'easy duration');
 
 // ------------------------------------------------------------
 // 6. Has hard + long, 2 rides (160 min) → 2 easy
@@ -92,11 +91,11 @@ check($r['suggestions'][1]['duration'] === 56, 'easy duration');
 // ------------------------------------------------------------
 echo "\nhas hard + long — two easy remaining\n";
 $r = suggest([day(4800, true, true), day(4800)], $s);
-check(count($r['suggestions']) === 2,          'two suggestions');
-check($r['suggestions'][0]['type'] === 'easy', 'first is easy');
-check($r['suggestions'][1]['type'] === 'easy', 'second is easy');
-check($r['suggestions'][0]['duration'] === 70, 'first easy duration');
-check($r['suggestions'][1]['duration'] === 70, 'second easy duration');
+check(count($r) === 2,                 'two suggestions');
+check($r[0]['type'] === 'easy',        'first is easy');
+check($r[1]['type'] === 'easy',        'second is easy');
+check($r[0]['duration'] === 70,        'first easy duration');
+check($r[1]['duration'] === 70,        'second easy duration');
 
 // ------------------------------------------------------------
 // 7. Custom settings respected (target_rides = 3)
@@ -104,9 +103,9 @@ check($r['suggestions'][1]['duration'] === 70, 'second easy duration');
 // ------------------------------------------------------------
 echo "\ncustom settings (3 rides target)\n";
 $r = suggest([day(9600)], array_merge($s, ['target_rides' => 3]));
-check(count($r['suggestions']) === 2,          'two suggestions');
-check($r['suggestions'][0]['type'] === 'hard', 'hard');
-check($r['suggestions'][1]['type'] === 'long', 'long');
+check(count($r) === 2,                 'two suggestions');
+check($r[0]['type'] === 'hard',        'hard');
+check($r[1]['type'] === 'long',        'long');
 
 // ------------------------------------------------------------
 // Summary
