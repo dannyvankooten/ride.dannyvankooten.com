@@ -6,7 +6,7 @@ The goal is to get you between 150 - 300 minutes of moving time per week with at
 
 This application is running in production on [ride.dannyvankooten.com](https://ride.dannyvankooten.com).
 
-![Screenshot of the Strava Suggest Workout app](screenshot.png)
+![Screenshot of the Strava Suggest Workout app](public/screenshot.png)
 
 ## Run  locally
 

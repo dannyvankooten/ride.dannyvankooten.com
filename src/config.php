@@ -12,11 +12,11 @@ function tokensFile(): string {
 }
 
 const SETTINGS_DEFAULTS = [
-    'target_rides'     => 4,
     'target_minutes'   => 150,
     'long_ride_factor' => 1.5,
     'ftp'              => null,
     'max_heartrate'    => null,
+    'available_days'   => [0, 1, 2, 3, 4], // Mon–Fri
 ];
 
 function settingsFile(): string { return varDir() . 'settings.json'; }

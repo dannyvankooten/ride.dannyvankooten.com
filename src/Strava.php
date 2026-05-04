@@ -162,8 +162,9 @@ function fetchRides(string $accessToken, int $days, array $settings): array {
 function classifyRide(array $ride, string $accessToken, array $settings): array {
     $ftp    = $settings['ftp'];
     $maxHr  = $settings['max_heartrate'];
-    $long   = ($ride['moving_time'] ?? 0) >= $settings['long_ride_factor']
-        * ($settings['target_minutes'] / ($settings['target_rides'] - 1 + $settings['long_ride_factor'])) * 60;
+    $numSlots = max(1, count($settings['available_days'] ?? [0, 1, 2, 3, 4]));
+    $long     = ($ride['moving_time'] ?? 0) >= $settings['long_ride_factor']
+        * ($settings['target_minutes'] / ($numSlots - 1 + $settings['long_ride_factor'])) * 60;
     $id     = (int) $ride['id'];
 
     // Tier 1: per-second power stream

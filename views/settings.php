@@ -11,6 +11,13 @@ $pageStyle = <<<'CSS'
   .page-header__link { font-size: .8rem; color: #aaa; text-decoration: none; }
   .page-header__link:hover { color: #555; }
 
+  /* Available-days picker */
+  .day-picker { display: flex; gap: 8px; flex-wrap: wrap; }
+  .day-picker__label { display: flex; flex-direction: column; align-items: center; gap: 4px;
+    font-size: .75rem; color: #555; cursor: pointer; }
+  .day-picker__label input[type=checkbox] { width: 20px; height: 20px; cursor: pointer; }
+  .day-picker__label input:checked + span { font-weight: 700; color: #222; }
+
   /* Settings form */
   .settings-form { background: #fff; border-radius: 10px; padding: 24px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
   .settings-form__section { margin-bottom: 28px; }
@@ -43,10 +50,21 @@ CSS;
 
       <div class="settings-form__row">
         <label class="settings-form__label">
-          <span class="settings-form__label-text">Target rides</span>
-          <span class="settings-form__hint">Number of rides to complete each week.</span>
+          <span class="settings-form__label-text">Available riding days</span>
+          <span class="settings-form__hint">Which days of the week are you available to ride?</span>
         </label>
-        <input class="settings-form__input" type="number" name="target_rides" min="1" max="7" value="<?= (int) $settings['target_rides'] ?>">
+        <div class="day-picker">
+          <?php
+          $dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+          $avail    = $settings['available_days'] ?? [0, 1, 2, 3, 4];
+          foreach ($dayNames as $i => $name):
+          ?>
+          <label class="day-picker__label">
+            <input type="checkbox" name="available_days[]" value="<?= $i ?>"<?= in_array($i, $avail, true) ? ' checked' : '' ?>>
+            <span><?= $name ?></span>
+          </label>
+          <?php endforeach; ?>
+        </div>
       </div>
 
       <div class="settings-form__row">

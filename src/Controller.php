@@ -2,7 +2,7 @@
 
 class Controller
 {
-    private const CACHE_TTL = 900; // 15 minutes
+    private const CACHE_TTL = 60*60; // 1 hour
 
     private const BADGE_COLORS = [
         'hard' => '#c0392b',
@@ -80,29 +80,26 @@ class Controller
         $settings = loadSettings();
         [$allRides, $cacheAge] = $this->loadRides($accessToken, $settings);
 
-        $cutoff    = date('Y-m-d', strtotime('-7 days'));
-        $weekRides = array_values(array_filter($allRides, fn($r) => $r['date'] >= $cutoff));
-
-        $suggestions = suggest($weekRides, $settings);
-
-        $ridesDone   = count($weekRides);
+        // Rolling 7-day window including today
+        $cutoff      = date('Y-m-d', strtotime('-6 days'));
+        $weekRides   = array_values(array_filter($allRides, fn($r) => $r['date'] >= $cutoff));
         $minutesDone = (int) round(array_sum(array_column($weekRides, 'moving_time')) / 60);
         $hasHard     = detectHardRide($weekRides);
         $hasLong     = detectLongRide($weekRides);
 
+        $weekSchedule = schedule($allRides, $settings);
+
         $this->classifyRides($allRides);
 
         $this->render('dashboard', [
-            'allRides'    => $allRides,
-            'cacheAge'    => $cacheAge,
-            'weekRides'   => $weekRides,
-            'suggestions' => $suggestions,
-            'ridesDone'   => $ridesDone,
-            'minutesDone' => $minutesDone,
-            'hasHard'     => $hasHard,
-            'hasLong'     => $hasLong,
-            'colors'      => self::BADGE_COLORS,
-            'settings'    => $settings,
+            'allRides'     => $allRides,
+            'cacheAge'     => $cacheAge,
+            'weekSchedule' => $weekSchedule,
+            'minutesDone'  => $minutesDone,
+            'hasHard'      => $hasHard,
+            'hasLong'      => $hasLong,
+            'colors'       => self::BADGE_COLORS,
+            'settings'     => $settings,
         ]);
     }
 
@@ -112,12 +109,16 @@ class Controller
         if ($tokens === null) { header('Location: /'); exit; }
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $rawDays       = array_map('intval', (array) ($_POST['available_days'] ?? []));
+            $availableDays = array_values(array_unique(array_filter($rawDays, fn($d) => $d >= 0 && $d <= 6)));
+            sort($availableDays);
+
             saveSettings([
-                'target_rides'     => min(7,    max(1,   (int)   ($_POST['target_rides']     ?? 4))),
-                'target_minutes'   => min(1800, max(1,   (int)   ($_POST['target_minutes']   ?? 300))),
+                'target_minutes'   => min(1800, max(1,   (int)   ($_POST['target_minutes']   ?? 150))),
                 'long_ride_factor' => min(2.5,  max(1.0, (float) ($_POST['long_ride_factor'] ?? 1.5))),
                 'ftp'           => ($_POST['ftp']           ?? '') !== '' ? min(1000, max(1, (int) $_POST['ftp']))           : null,
                 'max_heartrate' => ($_POST['max_heartrate'] ?? '') !== '' ? min(300,  max(1, (int) $_POST['max_heartrate'])) : null,
+                'available_days'   => $availableDays,
             ]);
             header('Location: /settings');
             exit;
@@ -136,7 +137,7 @@ class Controller
     private function render(string $view, array $vars = []): void
     {
         extract($vars, EXTR_SKIP);
-        $title     = 'Strava Workout Planner';
+        $title     = 'WattWeek - your personalised riding plan';
         $pageStyle = '';
         ob_start();
         include __DIR__ . '/../views/' . $view . '.php';

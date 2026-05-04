@@ -23,137 +23,191 @@ function day(int $sec, bool $hasHard = false, bool $hasLong = false, ?string $da
     return $d;
 }
 
+function ago(int $days): string { return date('Y-m-d', strtotime("-$days days")); }
+function fwd(int $days): string { return date('Y-m-d', strtotime("+$days days")); }
+function today(): string        { return date('Y-m-d'); }
+
+// Base settings: all 7 days available, target = 300 min, factor = 1.5
 $s = [
-    'target_rides'     => 4,
     'target_minutes'   => 300,
     'long_ride_factor' => 1.5,
+    'available_days'   => [0, 1, 2, 3, 4, 5, 6],
     'ftp'              => null,
     'max_heartrate'    => null,
 ];
 
-// base = 300 / (4 - 1 + 1.5) = 300 / 4.5 = 66.67 → 67 min
-// long = round(66.67 × 1.5) = round(100.0) = 100 min
+// ------------------------------------------------------------
+// 1. No rides last 7 days → effective=600
+//    Schedule: hard(0), long(1), easy(2-4), long(5), easy(6)
+//    Units = 1 + 2*1.5 + 4 = 8; base = 600/8 = 75; long = 113
+// ------------------------------------------------------------
+echo "no rides last 7 days\n";
+$r = schedule([], $s);
+check(count($r) === 7,                  '7 days returned');
+check($r[0]['date'] === today(),        'first day is today');
+check($r[0]['status'] === 'scheduled',  'today is scheduled');
+check($r[0]['type'] === 'hard',         'today gets hard');
+check($r[0]['duration'] === 75,         'hard duration 75 min');
+check($r[1]['type'] === 'long',         'day 1 gets long');
+check($r[1]['duration'] === 113,        'long duration 113 min');
+check($r[2]['type'] === 'easy',         'day 2 is easy');
+check($r[5]['type'] === 'long',         'day 5 gets long (4 days after day 1)');
 
 // ------------------------------------------------------------
-// 1. Empty week → long ride (100 min)
+// 2. Rode 150 min last week → effective=450
+//    base = 450/8 = 56.25 → 56; long = round(84.375) = 84
 // ------------------------------------------------------------
-echo "empty week\n";
-$r = suggest([], $s);
-check(count($r) === 1,           'one suggestion');
-check($r[0]['type'] === 'long',  'type is long');
-check($r[0]['duration'] === 100, 'duration 100 min');
+echo "\nrode 150/300 last week\n";
+$r = schedule([day(9000, false, false, ago(3))], $s); // 150 min, 3 days ago
+check($r[0]['type'] === 'hard',  'hard assigned');
+check($r[0]['duration'] === 56,  'base 56 min');
+check($r[1]['type'] === 'long',  'long assigned');
+check($r[1]['duration'] === 84,  'long 84 min');
 
 // ------------------------------------------------------------
-// 2. Hard not done (any rides, time remaining) → hard
+// 3. Rode 360 min last week → deficit clamped to -60 → effective=240
+//    base = 240/8 = 30; long = 45
 // ------------------------------------------------------------
-echo "\nhard not done\n";
-$r = suggest([day(1800), day(1800)], $s); // 2 × 30 min, no flags
-check(count($r) === 1,           'one suggestion');
-check($r[0]['type'] === 'hard',  'type is hard');
-check($r[0]['duration'] === 67,  'duration 67 min');
+echo "\nrode 360/300 last week (credit capped at 20%)\n";
+$r = schedule([day(21600, false, false, ago(3))], $s);
+check($r[0]['duration'] === 30, 'base 30 min (credit capped)');
+check($r[1]['duration'] === 45, 'long 45 min');
 
 // ------------------------------------------------------------
-// 3. Hard done, long not done → long
+// 4. Rode 500 min last week → same credit cap as #3
 // ------------------------------------------------------------
-echo "\nlong not done\n";
-$r = suggest([day(4800, true), day(4800)], $s); // 2 × 80 min, first is hard
-check(count($r) === 1,           'one suggestion');
-check($r[0]['type'] === 'long',  'type is long');
-check($r[0]['duration'] === 100, 'duration 100 min');
+echo "\nrode 500/300 last week (still capped at -60)\n";
+$r = schedule([day(30000, false, false, ago(3))], $s);
+check($r[0]['duration'] === 30, 'base still 30 min');
+check($r[1]['duration'] === 45, 'long still 45 min');
 
 // ------------------------------------------------------------
-// 4. Hard + long done, volume remaining → easy (min of base or remaining)
-//    2 × 80 min = 160 min done, remaining = 140 min → easy 67 min
+// 5. Hard done today → no further hards (last hard < 7 days);
+//    long still scheduled (lastLong=null)
 // ------------------------------------------------------------
-echo "\neasy volume remaining\n";
-$r = suggest([day(4800, true, true), day(4800)], $s); // 160 min, has hard + long
-check(count($r) === 1,           'one suggestion');
-check($r[0]['type'] === 'easy',  'type is easy');
-check($r[0]['duration'] === 67,  'duration capped at base (67 min)');
+echo "\nhard done today\n";
+$r = schedule([day(4800, true, false, today())], $s);
+check($r[0]['status'] === 'completed', 'today is completed');
+$sched = array_column(array_filter($r, fn($d) => $d['status'] === 'scheduled'), 'type');
+check(!in_array('hard', $sched), 'no hard scheduled (last hard < 7 days ago)');
+check(in_array('long', $sched),  'long still scheduled');
 
 // ------------------------------------------------------------
-// 5. Volume target met → rest
+// 6. Long done today → hard scheduled tomorrow; long can repeat after 4 days
+//    Schedule: completed-long, hard, easy, easy, long, easy, easy
 // ------------------------------------------------------------
-echo "\nvolume met — rest\n";
-$r = suggest([day(4800), day(4800), day(4800), day(4800)], $s); // 4 × 80 min = 320 min
-check(count($r) === 1,           'one suggestion');
-check($r[0]['type'] === 'rest',  'type is rest');
-check($r[0]['duration'] === null,'no duration for rest');
+echo "\nlong done today\n";
+$r = schedule([day(6000, false, true, today())], $s);
+check($r[0]['status'] === 'completed', 'today is completed');
+check($r[1]['type'] === 'hard',        'hard on tomorrow');
+check($r[4]['type'] === 'long',        'long on day 4 (4 days after today)');
 
 // ------------------------------------------------------------
-// 6. Volume met, long ride only → rest (hard not forced when above target)
+// 7. Both hard and long done today → no hard for 7 days;
+//    long can repeat at day 4
 // ------------------------------------------------------------
-echo "\nvolume met with single long ride — rest\n";
-$r = suggest([day(19200, false, true)], $s); // 320 min long ride
-check(count($r) === 1,           'one suggestion');
-check($r[0]['type'] === 'rest',  'type is rest');
+echo "\nboth hard and long done today\n";
+$r = schedule([day(6000, true, true, today())], $s);
+check($r[0]['status'] === 'completed', 'today is completed');
+$sched = array_column(array_filter($r, fn($d) => $d['status'] === 'scheduled'), 'type');
+check(!in_array('hard', $sched), 'no hard scheduled (< 7 days)');
+check($r[4]['type'] === 'long',  'long on day 4');
 
 // ------------------------------------------------------------
-// 7. Already rode enough today → no suggestion
-//    base = 67 min; today's ride = 320 min → suppress
+// 7b. Hard+long yesterday → no hard until day 6 (7 days after yesterday);
+//     long appears at day 3 (4 days after yesterday)
 // ------------------------------------------------------------
-echo "\nalready rode today\n";
-$today = date('Y-m-d');
-$r = suggest([day(19200, false, false, $today)], $s); // 320 min today
-check(empty($r), 'no suggestion when already rode today');
+echo "\nhard+long yesterday\n";
+$r = schedule([day(4800, true, true, ago(1))], $s);
+check($r[0]['type'] === 'easy',  'today is easy (hard+long yesterday)');
+check($r[3]['type'] === 'long',  'long on day 3 (4 days after yesterday)');
+check($r[6]['type'] === 'hard',  'hard on day 6 (7 days after yesterday)');
 
 // ------------------------------------------------------------
-// 8. Rode today but below base → suggestion still shown
-//    30 min < 67 min base → still suggest hard
+// 7c. Hard+long 7 days ago → outside spacing windows
 // ------------------------------------------------------------
-echo "\nshort ride today — still suggest\n";
-$r = suggest([day(1800, false, false, $today)], $s); // 30 min today
-check(count($r) === 1,          'one suggestion');
-check($r[0]['type'] === 'hard', 'hard suggested despite short ride today');
+echo "\nhard+long 7 days ago\n";
+$r = schedule([day(4800, true, true, ago(7))], $s);
+check($r[0]['type'] === 'hard',  'hard available today (7 days since last hard)');
+$types = array_column($r, 'type');
+check(in_array('long', $types),  'long still scheduled');
 
 // ------------------------------------------------------------
-// 9. All rides done (has hard+long), gap remaining → easy gap
-//    4 × 50 min = 200 min, remaining = 100 min → easy min(67, 100) = 67 min
+// 8. Rode today (easy) → today excluded; hard tomorrow, long day 2
 // ------------------------------------------------------------
-echo "\nall rides done, time short\n";
-$r = suggest([day(3000, true, false), day(3000, false, true), day(3000), day(3000)], $s);
-check(count($r) === 1,           'one suggestion');
-check($r[0]['type'] === 'easy',  'type is easy');
-check($r[0]['duration'] === 67,  'duration capped at base (67 min)');
+echo "\nrode today (easy)\n";
+$r = schedule([day(3600, false, false, today())], $s); // 60 min easy
+check($r[0]['status'] === 'completed', 'today is completed');
+check($r[0]['duration'] === 60,        'today duration 60 min');
+check($r[1]['type'] === 'hard',        'hard on tomorrow');
+check($r[2]['type'] === 'long',        'long on day 2');
 
 // ------------------------------------------------------------
-// 10. Small gap (below base) → easy with exact remaining duration
-//     remaining = 30 min < 67 min base → easy 30 min
+// 9. Only 1 available day → hard takes priority
 // ------------------------------------------------------------
-echo "\nsmall gap below base\n";
-$r = suggest([day(16200, true, true)], $s); // 270 min done, remaining = 30
-check(count($r) === 1,           'one suggestion');
-check($r[0]['type'] === 'easy',  'type is easy');
-check($r[0]['duration'] === 30,  'duration = exact remaining (30 min)');
+echo "\nonly 1 available day\n";
+$sOne = array_merge($s, ['available_days' => [dayOfWeek(fwd(3))]]);
+$r    = schedule([], $sOne);
+$scheduled = array_filter($r, fn($d) => $d['status'] === 'scheduled');
+check(count($scheduled) === 1,                        'exactly 1 scheduled slot');
+check(array_values($scheduled)[0]['type'] === 'hard', 'single slot gets hard');
 
 // ------------------------------------------------------------
-// 11. Custom settings (target_rides = 3)
-//     base = 300 / (3 - 1 + 1.5) = 300 / 3.5 = 85.71 → 86 min
+// 10. No available days → all 7 days are rest
 // ------------------------------------------------------------
-echo "\ncustom settings (3 rides target)\n";
-$r = suggest([day(9600)], array_merge($s, ['target_rides' => 3])); // 160 min, no flags
-check(count($r) === 1,           'one suggestion');
-check($r[0]['type'] === 'hard',  'type is hard');
-check($r[0]['duration'] === 86,  'duration 86 min (base for 3-ride plan)');
+echo "\nno available days\n";
+$sNone = array_merge($s, ['available_days' => []]);
+$r     = schedule([], $sNone);
+$types = array_unique(array_column($r, 'type'));
+check($types === ['rest'], 'all days are rest');
 
 // ------------------------------------------------------------
-// 12. Volume met, last ride 3+ days ago → easy (3-day rule)
+// 11. Unavailable day in window → that day is rest
 // ------------------------------------------------------------
-echo "\nvolume met, 3-day rule fires\n";
-$ago3 = date('Y-m-d', strtotime('-3 days'));
-$r = suggest([day(19200, false, true, $ago3)], $s); // 320 min, 3 days ago
-check(count($r) === 1,          'one suggestion');
-check($r[0]['type'] === 'easy', 'type is easy');
-check($r[0]['duration'] === 67, 'base easy duration');
+echo "\nunavailable day is rest\n";
+$sMon = array_merge($s, ['available_days' => [0]]);
+$r    = schedule([], $sMon);
+foreach ($r as $day) {
+    if ($day['dow'] !== 0) {
+        check($day['status'] === 'rest', 'non-Mon day is rest (dow=' . $day['dow'] . ')');
+        break;
+    }
+}
 
 // ------------------------------------------------------------
-// 13. Volume met, last ride 2 days ago → rest
+// 12. All 7 result entries have required keys and dates are today..+6
 // ------------------------------------------------------------
-echo "\nvolume met, within rest window\n";
-$ago2 = date('Y-m-d', strtotime('-2 days'));
-$r = suggest([day(19200, false, true, $ago2)], $s); // 320 min, 2 days ago
-check(count($r) === 1,          'one suggestion');
-check($r[0]['type'] === 'rest', 'type is rest');
+echo "\nschedule covers today through +6 days\n";
+$r    = schedule([], $s);
+$keys = ['date', 'dow', 'status', 'type', 'duration', 'description'];
+check($r[0]['date'] === today(), 'first entry is today');
+check($r[6]['date'] === fwd(6),  'last entry is today+6');
+$allKeys = array_reduce($r, fn($ok, $d) => $ok && !array_diff($keys, array_keys($d)), true);
+check($allKeys, 'all entries have required keys');
+
+// ------------------------------------------------------------
+// 13. Today's hard ride shows as completed with type=hard
+// ------------------------------------------------------------
+echo "\ntoday's hard ride shows as completed\n";
+$r = schedule([day(4800, true, false, today())], $s);
+check($r[0]['status'] === 'completed', 'today status is completed');
+check($r[0]['type']   === 'hard',      'today type is hard');
+check($r[0]['duration'] === 80,        'today duration 80 min');
+
+// ------------------------------------------------------------
+// 14. daysBetween: date-only, DST-safe, ignores time component
+// ------------------------------------------------------------
+echo "\ndaysBetween\n";
+check(daysBetween('2026-05-03', '2026-05-04') === 1, 'consecutive days');
+check(daysBetween('2026-05-04', '2026-05-04') === 0, 'same day');
+check(daysBetween('2026-05-04', '2026-05-11') === 7, '7-day gap');
+check(daysBetween('2026-05-04', '2026-05-03') === -1, 'reverse direction');
+// EU DST transitions: end 2026-10-25 (25h day), start 2026-03-29 (23h day)
+check(daysBetween('2026-10-24', '2026-10-26') === 2, 'across DST end');
+check(daysBetween('2026-03-28', '2026-03-30') === 2, 'across DST start');
+// Defensive: any time component on the input is ignored
+check(daysBetween('2026-05-03 21:00:00', '2026-05-04 06:00:00') === 1,
+      'evening yesterday → morning today === 1');
 
 // ------------------------------------------------------------
 // Summary

@@ -1,5 +1,5 @@
 <?php
-$pageStyle = <<<'CSS'
+$pageStyle = <<<CSS
   body { font-family: system-ui, sans-serif; background: #f5f5f5; color: #222; padding: 24px 16px; }
   .page { max-width: 720px; margin: 0 auto; }
   h1 { font-size: 1.5rem; }
@@ -25,12 +25,20 @@ $pageStyle = <<<'CSS'
   .banner--complete { background: #d5f5e3; border: 1px solid #a9dfbf; margin-bottom: 28px; color: #1e8449; }
   .banner--warning { background: #fef9e7; border: 1px solid #f9e79f; margin-bottom: 16px; color: #9a7d0a; }
 
-  /* Suggestions */
-  .suggestions { display: flex; flex-direction: column; gap: 12px; margin-bottom: 32px; }
-  .suggestions__item { background: #fff; border-radius: 10px; padding: 18px 20px; box-shadow: 0 1px 4px rgba(0,0,0,.08); display: flex; align-items: flex-start; gap: 16px; }
-  .suggestions__body { flex: 1; }
-  .suggestions__duration { font-weight: 600; margin-bottom: 4px; }
-  .suggestions__desc { font-size: .875rem; color: #555; line-height: 1.4; }
+  /* 7-day schedule */
+  .schedule { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 32px; }
+  .schedule__day { background: #fff; border-radius: 10px; padding: 12px 8px; box-shadow: 0 1px 4px rgba(0,0,0,.08); text-align: center; }
+  .schedule__day--today { outline: 2px solid #222; outline-offset: -2px; }
+  .schedule__day--completed { opacity: .5; }
+  .schedule__dow { font-size: .65rem; color: #888; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 2px; }
+  .schedule__date { font-size: .7rem; color: #aaa; margin-bottom: 6px; }
+  .schedule__badge { display: inline-block; margin-bottom: 6px; }
+  .schedule__duration { font-size: .8rem; font-weight: 600; }
+  .schedule__rolling { font-size: .65rem; color: #aaa; margin-top: 4px; }
+
+  @media (max-width: 560px) {
+    .schedule { grid-template-columns: repeat(4, 1fr); }
+  }
 
   /* Badge (shared) */
   .badge { color: #fff; border-radius: 6px; padding: 3px 10px; font-size: .75rem; font-weight: 700; text-transform: uppercase; white-space: nowrap; }
@@ -72,9 +80,9 @@ $pageStyle = <<<'CSS'
     tbody tr:not(.rides__divider) td:nth-child(4) { grid-column: 2; grid-row: 1; font-size: .8rem; color: #888; text-align: right; white-space: nowrap; }
     tbody tr:not(.rides__divider) td:nth-child(5) { grid-column: 2; grid-row: 3; font-size: .8rem; color: #888; text-align: right; white-space: nowrap; }
     tbody tr:not(.rides__divider) td:nth-child(6) { grid-column: 2; grid-row: 4; font-size: .8rem; color: #888; text-align: right; white-space: nowrap; }
-    tbody tr:not(.rides__divider) td:nth-child(4)::before { content: "⏱\00a0"; }
-    tbody tr:not(.rides__divider) td:nth-child(5)::before { content: "♥\00a0"; }
-    tbody tr:not(.rides__divider) td:nth-child(6)::before { content: "⚡\00a0"; }
+    tbody tr:not(.rides__divider) td:nth-child(4)::before { content: "\⏱"; filter: grayscale(100%); display: inline-block; margin-right: 2px; }
+    tbody tr:not(.rides__divider) td:nth-child(5)::before { content: "\♥"; filter: grayscale(100%); display: inline-block; margin-right: 2px; }
+    tbody tr:not(.rides__divider) td:nth-child(6)::before { content: "\⚡"; filter: grayscale(100%); display: inline-block; margin-right: 2px; }
   }
 CSS;
 ?>
@@ -96,10 +104,6 @@ CSS;
       <div class="stats__label">minutes this week</div>
     </div>
     <div class="stats__item">
-      <div class="stats__value"><?= $ridesDone ?> / <?= $settings['target_rides'] ?></div>
-      <div class="stats__label">rides this week</div>
-    </div>
-    <div class="stats__item">
       <div class="stats__value <?= $hasHard ? 'stats__value--complete' : 'stats__value--missing' ?>"><?= $hasHard ? '✓' : '✗' ?></div>
       <div class="stats__label">hard ride</div>
     </div>
@@ -109,21 +113,52 @@ CSS;
     </div>
   </div>
 
-  <?php if ($suggestions): ?>
-  <?php $s = $suggestions[0]; ?>
-  <h2>Today's suggested workout</h2>
-  <div class="suggestions">
-    <div class="suggestions__item">
-      <span class="badge" style="background:<?= $colors[$s['type']] ?? '#888' ?>"><?= htmlspecialchars($s['type']) ?></span>
-      <div class="suggestions__body">
-        <?php if ($s['duration'] !== null): ?>
-        <div class="suggestions__duration"><?= $s['duration'] ?> min</div>
-        <?php endif; ?>
-        <div class="suggestions__desc"><?= htmlspecialchars($s['description']) ?></div>
-      </div>
+  <h2>This week's schedule</h2>
+  <div class="schedule">
+    <?php
+    $today    = date('Y-m-d');
+    $dowNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    // Combined map: actual past rides + planned future rides → minutes per date
+    $minutesByDate = [];
+    foreach ($allRides as $r) {
+        $minutesByDate[$r['date']] = (int) round($r['moving_time'] / 60);
+    }
+    foreach ($weekSchedule as $d) {
+        if ($d['status'] === 'scheduled' && $d['duration'] !== null) {
+            $minutesByDate[$d['date']] = $d['duration'];
+        }
+    }
+    $rollingTotal = function(string $endDate) use ($minutesByDate): int {
+        $start = date('Y-m-d', strtotime("$endDate -6 days"));
+        $sum = 0;
+        foreach ($minutesByDate as $date => $mins) {
+            if ($date >= $start && $date <= $endDate) $sum += $mins;
+        }
+        return $sum;
+    };
+
+    foreach ($weekSchedule as $day):
+      $classes = ['schedule__day'];
+      if ($day['date'] === $today)          $classes[] = 'schedule__day--today';
+      if ($day['status'] === 'completed')   $classes[] = 'schedule__day--completed';
+      $color = $colors[$day['type']] ?? '#bbb';
+    ?>
+    <div class="<?= implode(' ', $classes) ?>">
+      <div class="schedule__dow"><?= $dowNames[$day['dow']] ?></div>
+      <div class="schedule__date"><?= date('j M', strtotime($day['date'])) ?></div>
+      <?php if ($day['type'] !== 'rest'): ?>
+      <span class="badge schedule__badge" style="background:<?= $color ?>"><?= $day['type'] ?></span>
+      <?php else: ?>
+      <span class="schedule__badge" style="color:#bbb; font-size:.75rem">rest</span>
+      <?php endif; ?>
+      <?php if ($day['duration'] !== null): ?>
+      <div class="schedule__duration"><?= $day['duration'] ?> min</div>
+      <?php endif; ?>
+      <div class="schedule__rolling">Σ <?= $rollingTotal($day['date']) ?> min</div>
     </div>
+    <?php endforeach; ?>
   </div>
-  <?php endif; ?>
 
   <?php if ($allRides): ?>
   <h2>Recent rides</h2>
@@ -134,13 +169,13 @@ CSS;
         <th>Date</th>
         <th>Ride</th>
         <th>Type</th>
-        <th>⏱ Duration</th>
-        <th>♥ Avg HR</th>
-        <th>⚡ Avg Watts</th>
+        <th><span style="filter: grayscale(100%);">⏱</span> Duration</th>
+        <th><span style="filter: grayscale(100%);">♥</span> Avg HR</th>
+        <th><span style="filter: grayscale(100%);">⚡</span> Avg Watts</th>
       </tr>
     </thead>
     <tbody>
-      <?php $cutoff = date('Y-m-d', strtotime('-7 days')); $pastWindow = false; ?>
+      <?php $cutoff = date('Y-m-d', strtotime('-6 days')); $pastWindow = false; ?>
       <?php foreach (array_reverse($allRides) as $r): ?>
       <?php if (!$pastWindow && $r['date'] < $cutoff): $pastWindow = true; ?>
       <tr class="rides__divider"><td colspan="6">older than 7 days</td></tr>
