@@ -58,6 +58,10 @@ function suggest(array $dayRides, array $settings): array {
     // Distribute remaining minutes across remaining slots
     $remainingMin = max(0.0, (float) $settings['target_minutes'] - $timeDoneMin);
 
+    if ($remainingMin <= 0) {
+        return [];
+    }
+
     $durations = distributeDurations($remainingSlots, $remainingMin, $settings);
 
     $suggestions = [];

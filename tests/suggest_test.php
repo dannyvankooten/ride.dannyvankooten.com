@@ -107,11 +107,19 @@ check($r[0]['duration'] === 70,        'first easy duration');
 check($r[1]['duration'] === 70,        'second easy duration');
 
 // ------------------------------------------------------------
-// 7. Custom settings respected (target_rides = 3)
+// 7. Already over target minutes, rides short → no suggestions
+//    1 ride of 320 min (> 300 target) but only 1 of 4 rides done
+// ------------------------------------------------------------
+echo "\nalready over target minutes, rides short\n";
+$r = suggest([day(19200)], $s); // 320 min, 1 ride
+check(empty($r),                       'no suggestions when duration already met');
+
+// ------------------------------------------------------------
+// 8. Custom settings respected (target_rides = 3)
 //    1 ride done (160 min), remaining = 2 → hard + long only
 // ------------------------------------------------------------
 echo "\ncustom settings (3 rides target)\n";
-$r = suggest([day(9600)], array_merge($s, ['target_rides' => 3]));
+$r = suggest([day(9600)], array_merge($s, ['target_rides' => 3])); // 160 min
 check(count($r) === 2,                 'two suggestions');
 check($r[0]['type'] === 'hard',        'hard');
 check($r[1]['type'] === 'long',        'long');
