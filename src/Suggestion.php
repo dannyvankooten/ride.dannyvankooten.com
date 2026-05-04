@@ -1,91 +1,70 @@
 <?php
 
 /**
- * Analyse completed ride days and return a list of suggested workouts.
+ * Return the single suggested workout for today, or [] if no suggestion is needed.
  *
- * Each suggestion is an array with keys:
- *   type        => 'hard' | 'long' | 'easy'
- *   duration    => int (minutes)
+ * The returned array (when non-empty) has keys:
+ *   type        => 'hard' | 'long' | 'easy' | 'rest'
+ *   duration    => int (minutes) | null for rest
  *   description => string
+ *
+ * Priority:
+ *   1. Already rode enough today          → []
+ *   2. Weekly volume target met           → rest/strength
+ *   3. Fresh week (no rides yet)          → long ride
+ *   4. Hard ride not done this week       → hard ride
+ *   5. Long ride not done this week       → long ride
+ *   6. Volume remaining                   → easy ride
  */
 function suggest(array $dayRides, array $settings): array {
     $ridesDone   = count($dayRides);
     $timeDoneMin = array_sum(array_column($dayRides, 'moving_time')) / 60;
-
     $hasLongRide = detectLongRide($dayRides);
     $hasHardRide = detectHardRide($dayRides);
 
-    // Build the list of remaining slot types (priority: hard → long → easy)
-    $remainingSlots = [];
-    $remainingCount = max(0, $settings['target_rides'] - $ridesDone);
-
-    if (!$hasHardRide && $remainingCount > 0) {
-        $remainingSlots[] = 'hard';
-        $remainingCount--;
-    }
-    if (!$hasLongRide && $remainingCount > 0) {
-        $remainingSlots[] = 'long';
-        $remainingCount--;
-    }
-    while ($remainingCount > 0) {
-        $remainingSlots[] = 'easy';
-        $remainingCount--;
-    }
-
-    // Exception: no rides at all in 7 days — suggest one long easy ride to get moving.
-    if ($ridesDone === 0) {
-        $duration = (int) round(
-            $settings['long_ride_factor'] * $settings['target_minutes']
-            / ($settings['target_rides'] - 1 + $settings['long_ride_factor'])
-        );
-        return [[
-            'type'        => 'long',
-            'duration'    => $duration,
-            'description' => rideDescription('long'),
-        ]];
-    }
-
-    if (empty($remainingSlots)) {
-        $gap = (int) round($settings['target_minutes'] - $timeDoneMin);
-        if ($gap <= 0) return [];
-        return [[
-            'type'        => 'easy',
-            'duration'    => $gap,
-            'description' => rideDescription('easy'),
-        ]];
-    }
-
-    // Distribute remaining minutes across remaining slots
     $remainingMin = max(0.0, (float) $settings['target_minutes'] - $timeDoneMin);
+    $base         = $settings['target_minutes'] / ($settings['target_rides'] - 1 + $settings['long_ride_factor']);
 
-    if ($remainingMin <= 0) {
+    if (todayRideMinutes($dayRides) >= $base) {
         return [];
     }
 
-    $durations = distributeDurations($remainingSlots, $remainingMin, $settings);
-
-    $suggestions = [];
-    foreach ($remainingSlots as $i => $type) {
-        $suggestions[] = [
-            'type'        => $type,
-            'duration'    => $durations[$i],
-            'description' => rideDescription($type),
-        ];
+    if ($remainingMin <= 0) {
+        if (daysSinceLastRide($dayRides) >= 3) {
+            return [['type' => 'easy', 'duration' => (int) round($base), 'description' => rideDescription('easy')]];
+        }
+        return [['type' => 'rest', 'duration' => null, 'description' => rideDescription('rest')]];
     }
 
-    return $suggestions;
+    if ($ridesDone === 0) {
+        return [['type' => 'long', 'duration' => (int) round($base * $settings['long_ride_factor']), 'description' => rideDescription('long')]];
+    }
+
+    if (!$hasHardRide) {
+        return [['type' => 'hard', 'duration' => (int) round($base), 'description' => rideDescription('hard')]];
+    }
+
+    if (!$hasLongRide) {
+        return [['type' => 'long', 'duration' => (int) round($base * $settings['long_ride_factor']), 'description' => rideDescription('long')]];
+    }
+
+    return [['type' => 'easy', 'duration' => (int) round(min($base, $remainingMin)), 'description' => rideDescription('easy')]];
 }
 
-function distributeDurations(array $slots, float $totalMinutes, array $settings): array {
-    $units = array_map(fn($s) => $s === 'long' ? $settings['long_ride_factor'] : 1.0, $slots);
-    $totalUnits = array_sum($units);
+function daysSinceLastRide(array $dayRides): int {
+    $dates = array_filter(array_column($dayRides, 'date'));
+    if (empty($dates)) return 0;
+    return (int) floor((strtotime(date('Y-m-d')) - strtotime(max($dates))) / 86400);
+}
 
-    if ($totalUnits <= 0) {
-        return array_fill(0, count($slots), 0);
+function todayRideMinutes(array $dayRides): float {
+    $today = date('Y-m-d');
+    foreach ($dayRides as $day) {
+        if (($day['date'] ?? '') === $today) {
+            return $day['moving_time'] / 60;
+        }
     }
-
-    $minutesPerUnit = $totalMinutes / $totalUnits;
-    return array_map(fn($u) => (int) round($u * $minutesPerUnit), $units);
+    return 0.0;
 }
 
 function detectLongRide(array $dayRides): bool {
@@ -106,6 +85,7 @@ function rideDescription(string $type): string {
     return match ($type) {
         'hard' => 'High intensity — choose one: 2×20 min at threshold (FTP), or 5×4 min VO2max intervals at 110–120% FTP with equal rest.',
         'long' => 'Long zone 2 ride — steady conversational pace throughout.',
+        'rest' => 'Take a rest day or do a strength and mobility session.',
         default => 'Zone 2 endurance — comfortable effort, able to hold a conversation.',
     };
 }

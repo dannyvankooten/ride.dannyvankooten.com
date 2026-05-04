@@ -13,7 +13,7 @@ function tokensFile(): string {
 
 const SETTINGS_DEFAULTS = [
     'target_rides'     => 4,
-    'target_minutes'   => 300,
+    'target_minutes'   => 150,
     'long_ride_factor' => 1.5,
     'ftp'              => null,
     'max_heartrate'    => null,

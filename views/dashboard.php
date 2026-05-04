@@ -44,16 +44,37 @@ $pageStyle = <<<'CSS'
   .rides__table tr:last-child td { border-bottom: none; }
   .rides__na { color: #aaa; }
   .ride__types { display: flex; gap: 4px; flex-wrap: wrap; }
+  .rides__divider td { background: #f8f8f8; text-align: center; font-size: .75rem; color: #bbb; padding: 5px 14px; border-top: 2px solid #e8e8e8; }
+  .rides__row--past td { color: #bbb; }
+  .rides__row--past .badge { opacity: 0.4; }
+  .rides__row--past .rides__na { color: #ddd; }
 
   @media (max-width: 560px) {
-    .rides__table, thead, tbody, tr, th, td { display: block; }
+    .rides__table, thead, tbody, th, td { display: block; }
     thead { display: none; }
-    tbody tr { background: #fff; border-radius: 10px; margin-bottom: 10px; padding: 12px 14px; box-shadow: 0 1px 4px rgba(0,0,0,.08); border: none; }
-    tbody tr:last-child { margin-bottom: 0; }
-    .rides__table td { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-top: none; }
-    .rides__table td + td { border-top: 1px solid #f0f0f0; }
-    .rides__table td::before { content: attr(data-label); font-size: .75rem; font-weight: 600; color: #888; text-transform: uppercase; margin-right: 8px; flex-shrink: 0; }
     .rides__table { background: transparent; box-shadow: none; border-radius: 0; }
+
+    tbody tr:not(.rides__divider) {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 5px 12px;
+      padding: 12px 14px;
+      background: #fff;
+      border-radius: 10px;
+      margin-bottom: 10px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08);
+    }
+    tbody tr:not(.rides__divider):last-child { margin-bottom: 0; }
+    tbody tr:not(.rides__divider) td { padding: 0; border: none; }
+    tbody tr:not(.rides__divider) td:nth-child(1) { grid-column: 1; grid-row: 1; font-size: .8rem; color: #888; }
+    tbody tr:not(.rides__divider) td:nth-child(2) { grid-column: 1 / 3; grid-row: 2; }
+    tbody tr:not(.rides__divider) td:nth-child(3) { grid-column: 1; grid-row: 3 / 5; align-self: start; }
+    tbody tr:not(.rides__divider) td:nth-child(4) { grid-column: 2; grid-row: 1; font-size: .8rem; color: #888; text-align: right; white-space: nowrap; }
+    tbody tr:not(.rides__divider) td:nth-child(5) { grid-column: 2; grid-row: 3; font-size: .8rem; color: #888; text-align: right; white-space: nowrap; }
+    tbody tr:not(.rides__divider) td:nth-child(6) { grid-column: 2; grid-row: 4; font-size: .8rem; color: #888; text-align: right; white-space: nowrap; }
+    tbody tr:not(.rides__divider) td:nth-child(4)::before { content: "⏱\00a0"; }
+    tbody tr:not(.rides__divider) td:nth-child(5)::before { content: "♥\00a0"; }
+    tbody tr:not(.rides__divider) td:nth-child(6)::before { content: "⚡\00a0"; }
   }
 CSS;
 ?>
@@ -71,12 +92,12 @@ CSS;
 
   <div class="stats">
     <div class="stats__item">
-      <div class="stats__value"><?= $ridesDone ?> / <?= $settings['target_rides'] ?></div>
-      <div class="stats__label">rides this week</div>
-    </div>
-    <div class="stats__item">
       <div class="stats__value"><?= $minutesDone ?> / <?= $settings['target_minutes'] ?></div>
       <div class="stats__label">minutes this week</div>
+    </div>
+    <div class="stats__item">
+      <div class="stats__value"><?= $ridesDone ?> / <?= $settings['target_rides'] ?></div>
+      <div class="stats__label">rides this week</div>
     </div>
     <div class="stats__item">
       <div class="stats__value <?= $hasHard ? 'stats__value--complete' : 'stats__value--missing' ?>"><?= $hasHard ? '✓' : '✗' ?></div>
@@ -88,25 +109,20 @@ CSS;
     </div>
   </div>
 
-  <?php if ($complete): ?>
-  <div class="banner banner--complete">Week complete — all goals reached!</div>
-  <?php else: ?>
-
   <?php if ($suggestions): ?>
-  <h2>Suggested workouts</h2>
+  <?php $s = $suggestions[0]; ?>
+  <h2>Today's suggested workout</h2>
   <div class="suggestions">
-    <?php foreach ($suggestions as $s): ?>
     <div class="suggestions__item">
       <span class="badge" style="background:<?= $colors[$s['type']] ?? '#888' ?>"><?= htmlspecialchars($s['type']) ?></span>
       <div class="suggestions__body">
+        <?php if ($s['duration'] !== null): ?>
         <div class="suggestions__duration"><?= $s['duration'] ?> min</div>
+        <?php endif; ?>
         <div class="suggestions__desc"><?= htmlspecialchars($s['description']) ?></div>
       </div>
     </div>
-    <?php endforeach; ?>
   </div>
-  <?php endif; ?>
-
   <?php endif; ?>
 
   <?php if ($allRides): ?>
@@ -118,15 +134,20 @@ CSS;
         <th>Date</th>
         <th>Ride</th>
         <th>Type</th>
-        <th>Duration</th>
-        <th>Avg HR</th>
-        <th>Avg Watts</th>
+        <th>⏱ Duration</th>
+        <th>♥ Avg HR</th>
+        <th>⚡ Avg Watts</th>
       </tr>
     </thead>
     <tbody>
+      <?php $cutoff = date('Y-m-d', strtotime('-7 days')); $pastWindow = false; ?>
       <?php foreach (array_reverse($allRides) as $r): ?>
-      <tr>
-        <td data-label="Date"><?= htmlspecialchars($r['date']) ?></td>
+      <?php if (!$pastWindow && $r['date'] < $cutoff): $pastWindow = true; ?>
+      <tr class="rides__divider"><td colspan="6">older than 7 days</td></tr>
+      <?php endif; ?>
+      <tr<?= $pastWindow ? ' class="rides__row--past"' : '' ?>>
+        <?php $daysAgo = (int) floor((strtotime(date('Y-m-d')) - strtotime($r['date'])) / 86400); ?>
+        <td data-label="Date"><?= $daysAgo === 0 ? 'today' : ($daysAgo === 1 ? 'yesterday' : $daysAgo . ' days ago') ?></td>
         <td data-label="Ride"><?= htmlspecialchars(implode(', ', $r['names'])) ?></td>
         <td data-label="Type">
           <div class="ride__types">

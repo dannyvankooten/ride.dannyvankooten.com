@@ -8,6 +8,7 @@ class Controller
         'hard' => '#c0392b',
         'long' => '#2471a3',
         'easy' => '#1e8449',
+        'rest' => '#7f8c8d',
     ];
 
     public function dispatch(): void
@@ -83,7 +84,6 @@ class Controller
         $weekRides = array_values(array_filter($allRides, fn($r) => $r['date'] >= $cutoff));
 
         $suggestions = suggest($weekRides, $settings);
-        $complete    = empty($suggestions);
 
         $ridesDone   = count($weekRides);
         $minutesDone = (int) round(array_sum(array_column($weekRides, 'moving_time')) / 60);
@@ -96,7 +96,6 @@ class Controller
             'allRides'    => $allRides,
             'cacheAge'    => $cacheAge,
             'weekRides'   => $weekRides,
-            'complete'    => $complete,
             'suggestions' => $suggestions,
             'ridesDone'   => $ridesDone,
             'minutesDone' => $minutesDone,
