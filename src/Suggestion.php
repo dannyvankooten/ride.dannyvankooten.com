@@ -1,119 +1,166 @@
 <?php
 
 /**
- * Build the current calendar week's workout schedule (Monday–Sunday).
+ * Build the current calendar week's workout schedule (Monday-Sunday).
  *
- * Each returned element covers one calendar day and has keys:
- *   date        => 'Y-m-d'
- *   dow         => int  0=Monday … 6=Sunday
- *   status      => 'completed' | 'scheduled' | 'rest'
- *   type        => 'hard' | 'long' | 'easy' | 'rest'
- *   duration    => int (minutes) | null for rest
- *   description => string
+ * Rules (in order):
+ *   1) no hard ride in last 7 days -> hard
+ *   2) else no long ride in last 5 days -> long
+ *   3) else easy
  *
- * Algorithm:
- *   1. Walk each available day from today through Sunday. Spacing rules
- *      against the most recent hard/long ride (past or planned earlier in
- *      the walk):
- *        - hard if last hard ≥ 7 days ago
- *        - else long if last long ≥ 5 days ago
- *        - else easy
- *   2. Carry over any *surplus* from last calendar week (Mon–Sun): if last
- *      week's total exceeded target_minutes, this week's effective target is
- *      reduced by the overshoot. Under-riding last week does not roll forward.
- *   3. Distribute (effective_target − minutes done so far this calendar week)
- *      across the remaining planned days. Long rides count as
- *      long_ride_factor× the base duration. Missed riding days fall out of
- *      the divisor automatically, so the remaining days scale up to meet
- *      the weekly target.
+ * Scheduled ride minutes are distributed to match the remaining weekly target,
+ * where long rides count as long_ride_factor units.
  */
 function schedule(array $pastRides, array $settings, ?string $today = null): array {
     $today         = $today ?? date('Y-m-d');
-    $factor        = $settings['long_ride_factor'];
-    $availableDays = $settings['available_days'] ?? [0, 1, 2, 3, 4];
-
-    $rideByDate = [];
-    foreach ($pastRides as $r) {
-        $rideByDate[$r['date']] = $r;
-    }
+    $factor        = (float) ($settings['long_ride_factor'] ?? 1.5);
+    $availableDays = array_values(array_unique($settings['available_days'] ?? [0, 1, 2, 3, 4]));
+    sort($availableDays);
 
     $weekStart = startOfCalendarWeek($today);
     $weekEnd   = endOfCalendarWeek($today);
 
-    // Seed spacing tracker from past rides only (anything before today)
-    $lastHardDate = null;
-    $lastLongDate = null;
-    foreach ($pastRides as $r) {
-        if ($r['date'] >= $today) continue;
-        if (($r['has_hard'] ?? false) && ($lastHardDate === null || $r['date'] > $lastHardDate)) {
-            $lastHardDate = $r['date'];
-        }
-        if (($r['has_long'] ?? false) && ($lastLongDate === null || $r['date'] > $lastLongDate)) {
-            $lastLongDate = $r['date'];
-        }
-    }
+    $rideByDate      = ridesByDate($pastRides);
+    $availableDaySet = array_flip($availableDays);
+    $plannedTypes    = planRideTypes($pastRides, $rideByDate, $availableDaySet, $today, $weekEnd);
 
-    // Pass 1: walk today → Sunday, assign type per riding day, updating the
-    // spacing tracker so planned rides influence later decisions.
+    $effectiveTarget = effectiveTarget($pastRides, $settings, $today);
+    $doneThisWeek    = minutesDoneInRange($pastRides, $weekStart, $today);
+    $remaining       = max(0, $effectiveTarget - $doneThisWeek);
+    $durations       = allocateRideDurations($plannedTypes, $remaining, $factor);
+
+    return buildScheduleRows($rideByDate, $plannedTypes, $durations, $weekStart, $weekEnd, $today);
+}
+
+function ridesByDate(array $rides): array {
+    $byDate = [];
+    foreach ($rides as $ride) {
+        if (!isset($ride['date'])) continue;
+        $byDate[$ride['date']] = $ride;
+    }
+    return $byDate;
+}
+
+function latestRideDateWithFlag(array $rides, string $flag, string $beforeDate): ?string {
+    $latest = null;
+    foreach ($rides as $ride) {
+        if (($ride[$flag] ?? false) === false) continue;
+        $date = $ride['date'] ?? null;
+        if ($date === null || $date >= $beforeDate) continue;
+        if ($latest === null || $date > $latest) $latest = $date;
+    }
+    return $latest;
+}
+
+function planRideTypes(array $pastRides, array $rideByDate, array $availableDaySet, string $today, string $weekEnd): array {
     $plannedTypes = [];
-    for ($d = $today; $d <= $weekEnd; $d = date('Y-m-d', strtotime("$d +1 day"))) {
-        if (isset($rideByDate[$d])) {
-            $r = $rideByDate[$d];
-            if ($r['has_hard'] ?? false) $lastHardDate = $d;
-            if ($r['has_long'] ?? false) $lastLongDate = $d;
+    $lastHardDate = latestRideDateWithFlag($pastRides, 'has_hard', $today);
+    $lastLongDate = latestRideDateWithFlag($pastRides, 'has_long', $today);
+
+    for ($date = $today; $date <= $weekEnd; $date = date('Y-m-d', strtotime("$date +1 day"))) {
+        if (isset($rideByDate[$date])) {
+            $ride = $rideByDate[$date];
+            if ($ride['has_hard'] ?? false) $lastHardDate = $date;
+            if ($ride['has_long'] ?? false) $lastLongDate = $date;
             continue;
         }
-        if (!in_array(dayOfWeek($d), $availableDays, true)) continue;
 
-        $canHard = $lastHardDate === null || daysBetween($lastHardDate, $d) >= 7;
-        $canLong = $lastLongDate === null || daysBetween($lastLongDate, $d) >= 5;
-        if ($canHard) {
-            $plannedTypes[$d] = 'hard';
-            $lastHardDate = $d;
-        } elseif ($canLong) {
-            $plannedTypes[$d] = 'long';
-            $lastLongDate = $d;
-        } else {
-            $plannedTypes[$d] = 'easy';
-        }
+        if (!isset($availableDaySet[dayOfWeek($date)])) continue;
+
+        $type = pickRideType($lastHardDate, $lastLongDate, $date);
+        $plannedTypes[$date] = $type;
+
+        if ($type === 'hard') $lastHardDate = $date;
+        if ($type === 'long') $lastLongDate = $date;
     }
 
-    // Pass 2: distribute (effective_target − done_this_week) across this
-    // week's planned days. Missed past riding days have already fallen out
-    // of the planning walk, so the remaining days absorb their share
-    // automatically.
-    $effectiveTarget = effectiveTarget($pastRides, $settings, $today);
+    return $plannedTypes;
+}
 
-    $done = 0.0;
-    foreach ($pastRides as $r) {
-        if ($r['date'] >= $weekStart && $r['date'] <= $today) {
-            $done += $r['moving_time'] / 60;
-        }
+function pickRideType(?string $lastHardDate, ?string $lastLongDate, string $date): string {
+    if ($lastHardDate === null || daysBetween($lastHardDate, $date) >= 7) return 'hard';
+    if ($lastLongDate === null || daysBetween($lastLongDate, $date) >= 5) return 'long';
+    return 'easy';
+}
+
+function minutesDoneInRange(array $rides, string $startDate, string $endDate): float {
+    $minutes = 0.0;
+    foreach ($rides as $ride) {
+        $date = $ride['date'] ?? null;
+        if ($date === null || $date < $startDate || $date > $endDate) continue;
+        $minutes += $ride['moving_time'] / 60;
     }
-    $remaining = max(0, $effectiveTarget - $done);
-    $units     = 0;
-    foreach ($plannedTypes as $t) {
-        $units += ($t === 'long') ? $factor : 1;
+    return $minutes;
+}
+
+function allocateRideDurations(array $plannedTypes, float $remainingMinutes, float $longFactor): array {
+    $dates = array_keys($plannedTypes);
+    if ($dates === []) return [];
+
+    $targetMinutes = max(0, (int) round($remainingMinutes));
+    if ($targetMinutes === 0) return array_fill_keys($dates, 0);
+
+    $weights = [];
+    $totalWeight = 0.0;
+    foreach ($plannedTypes as $date => $type) {
+        $weight = ($type === 'long') ? $longFactor : 1.0;
+        $weights[$date] = $weight;
+        $totalWeight += $weight;
     }
-    $base = $units > 0 ? $remaining / $units : 0;
+
+    if ($totalWeight <= 0) return array_fill_keys($dates, 0);
 
     $durations = [];
-    foreach ($plannedTypes as $d => $t) {
-        $durations[$d] = (int) round(($t === 'long') ? $base * $factor : $base);
+    $fractions = [];
+    $assigned  = 0;
+    foreach ($weights as $date => $weight) {
+        $rawMinutes = ($targetMinutes * $weight) / $totalWeight;
+        $whole = (int) floor($rawMinutes);
+        $durations[$date] = $whole;
+        $fractions[$date] = $rawMinutes - $whole;
+        $assigned += $whole;
     }
 
-    // Build the display window: Monday through Sunday of the current week.
-    $result = [];
-    for ($d = $weekStart; $d <= $weekEnd; $d = date('Y-m-d', strtotime("$d +1 day"))) {
-        $dow  = dayOfWeek($d);
-        $ride = $rideByDate[$d] ?? null;
-        $past = ($d < $today);
+    $left = $targetMinutes - $assigned;
+    if ($left <= 0) return $durations;
 
-        if ($ride !== null && ($past || $d === $today)) {
-            $type = ($ride['has_hard'] ?? false) ? 'hard'
-                  : (($ride['has_long'] ?? false) ? 'long' : 'easy');
-            $result[] = [
-                'date'        => $d,
+    uksort($fractions, function (string $a, string $b) use ($fractions): int {
+        if ($fractions[$a] === $fractions[$b]) return strcmp($a, $b);
+        return $fractions[$a] > $fractions[$b] ? -1 : 1;
+    });
+
+    $fractionDates = array_keys($fractions);
+    $count = count($fractionDates);
+    for ($i = 0; $i < $left; $i++) {
+        $durations[$fractionDates[$i % $count]]++;
+    }
+
+    return $durations;
+}
+
+function rideTypeFromRide(array $ride): string {
+    if ($ride['has_hard'] ?? false) return 'hard';
+    if ($ride['has_long'] ?? false) return 'long';
+    return 'easy';
+}
+
+function buildScheduleRows(
+    array $rideByDate,
+    array $plannedTypes,
+    array $durations,
+    string $weekStart,
+    string $weekEnd,
+    string $today
+): array {
+    $rows = [];
+    for ($date = $weekStart; $date <= $weekEnd; $date = date('Y-m-d', strtotime("$date +1 day"))) {
+        $dow  = dayOfWeek($date);
+        $ride = $rideByDate[$date] ?? null;
+
+        if ($ride !== null && $date <= $today) {
+            $type = rideTypeFromRide($ride);
+            $rows[] = [
+                'date'        => $date,
                 'dow'         => $dow,
                 'status'      => 'completed',
                 'type'        => $type,
@@ -121,28 +168,33 @@ function schedule(array $pastRides, array $settings, ?string $today = null): arr
                 'description' => rideDescription($type),
                 'ids'         => $ride['ids'] ?? [],
             ];
-        } elseif (isset($plannedTypes[$d])) {
-            $t = $plannedTypes[$d];
-            $result[] = [
-                'date'        => $d,
+            continue;
+        }
+
+        if (isset($plannedTypes[$date])) {
+            $type = $plannedTypes[$date];
+            $rows[] = [
+                'date'        => $date,
                 'dow'         => $dow,
                 'status'      => 'scheduled',
-                'type'        => $t,
-                'duration'    => $durations[$d],
-                'description' => rideDescription($t),
+                'type'        => $type,
+                'duration'    => $durations[$date] ?? 0,
+                'description' => rideDescription($type),
             ];
-        } else {
-            $result[] = [
-                'date'        => $d,
-                'dow'         => $dow,
-                'status'      => 'rest',
-                'type'        => 'rest',
-                'duration'    => null,
-                'description' => rideDescription('rest'),
-            ];
+            continue;
         }
+
+        $rows[] = [
+            'date'        => $date,
+            'dow'         => $dow,
+            'status'      => 'rest',
+            'type'        => 'rest',
+            'duration'    => null,
+            'description' => rideDescription('rest'),
+        ];
     }
-    return $result;
+
+    return $rows;
 }
 
 /**

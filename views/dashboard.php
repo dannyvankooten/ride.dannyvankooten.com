@@ -27,10 +27,6 @@ $pageStyle = <<<CSS
   .schedule__badge { display: inline-block; margin-bottom: 6px; }
   .schedule__duration { font-size: .8rem; font-weight: 600; }
 
-  @media (max-width: 560px) {
-    .schedule { grid-template-columns: repeat(4, 1fr); }
-  }
-
   /* Week header (shared by current and past) */
   .week-header { display: flex; justify-content: space-between; align-items: baseline; font-size: .85rem; color: #666; margin-bottom: 6px; }
   .week-header h2 { margin: 0; font-size: inherit; color: inherit; }
@@ -48,6 +44,21 @@ $pageStyle = <<<CSS
   /* Make linked schedule cells indistinguishable from non-linked ones */
   a.schedule__day { display: block; text-decoration: none; color: inherit; }
   a.schedule__day:hover { box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+
+  @media (max-width: 560px) {
+    body { padding: 16px 12px; }
+    .page-header { align-items: flex-start; flex-wrap: wrap; gap: 8px 12px; }
+    .page-header__links { margin-left: 0; width: 100%; justify-content: flex-start; }
+    .week-header { gap: 12px; }
+    .schedule { grid-template-columns: 1fr; gap: 6px; margin-bottom: 28px; }
+    .schedule__day,
+    a.schedule__day { display: grid; grid-template-columns: 42px 54px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; padding: 10px 12px; text-align: left; }
+    .schedule__dow,
+    .schedule__date,
+    .schedule__badge { margin-bottom: 0; }
+    .schedule__badge { justify-self: start; }
+    .schedule__duration { justify-self: end; }
+  }
 CSS;
 ?>
 <div class="page">

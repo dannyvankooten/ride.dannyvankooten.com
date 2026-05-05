@@ -199,13 +199,13 @@ $past = [day(3600, false, false, '2026-05-05')]; // Tue 60 min
 $r    = schedule($past, $sUser, '2026-05-06');   // Wed
 // Remaining riding days this week: Thu, Sat, Sun. With no past hard/long,
 // plan is Thu=hard, Sat=long, Sun=easy.
-// done = 60, remaining = 90, units = 1 + 1.5 + 1 = 3.5, base = 90/3.5 ≈ 25.71
-// hard/easy = 26, long = round(25.71 * 1.5) = 39
+// done = 60, remaining = 90, units = 1 + 1.5 + 1 = 3.5
+// weighted allocation keeps the total exact at 90 min: hard=26, long=38, easy=26
 $byDate = array_column($r, null, 'date');
 check($byDate['2026-05-07']['type']     === 'hard', 'Thu hard (no past hard ride)');
 check($byDate['2026-05-07']['duration'] === 26,     'Thu hard duration 26 (90/3.5)');
 check($byDate['2026-05-09']['type']     === 'long', 'Sat long');
-check($byDate['2026-05-09']['duration'] === 39,     'Sat long duration 39 (90/3.5*1.5)');
+check($byDate['2026-05-09']['duration'] === 38,     'Sat long duration 38 (exact 90 min total)');
 check($byDate['2026-05-10']['duration'] === 26,     'Sun easy duration 26 (90/3.5)');
 
 // ------------------------------------------------------------
@@ -220,7 +220,7 @@ $with   = schedule([day(3600, false, false, '2026-05-05')], $sUser, '2026-05-06'
 $missBy = array_column($miss, null, 'date');
 $withBy = array_column($with, null, 'date');
 // miss: 150/3.5 = 42.86 → hard=43, long=64, easy=43.  Sum = 150
-// with: 90/3.5  = 25.71 → hard=26, long=39, easy=26.  Sum ≈ 91
+// with: weighted allocation gives hard=26, long=38, easy=26. Sum = 90
 check($missBy['2026-05-07']['duration'] === 43, 'missed: Thu hard 43 (150/3.5)');
 check($missBy['2026-05-09']['duration'] === 64, 'missed: Sat long 64');
 check($missBy['2026-05-10']['duration'] === 43, 'missed: Sun easy 43');
