@@ -80,27 +80,51 @@ class Controller
         $settings = loadSettings();
         [$allRides, $cacheAge] = $this->loadRides($accessToken, $settings);
 
-        // Rolling 7-day window including today
-        $cutoff      = date('Y-m-d', strtotime('-6 days'));
-        $weekRides   = array_values(array_filter($allRides, fn($r) => $r['date'] >= $cutoff));
+        // Current calendar week (Mon–Sun) — matches the planner's accounting
+        $weekStart   = startOfCalendarWeek(date('Y-m-d'));
+        $weekRides   = array_values(array_filter($allRides, fn($r) => $r['date'] >= $weekStart));
         $minutesDone = (int) round(array_sum(array_column($weekRides, 'moving_time')) / 60);
-        $hasHard     = detectHardRide($weekRides);
-        $hasLong     = detectLongRide($weekRides);
 
-        $weekSchedule = schedule($allRides, $settings);
-
-        $this->classifyRides($allRides);
+        $weekSchedule    = schedule($allRides, $settings);
+        $pastWeeks       = $this->buildPastWeeks($allRides, $weekStart, 3);
+        $weeklyTarget    = effectiveTarget($allRides, $settings);
 
         $this->render('dashboard', [
-            'allRides'     => $allRides,
             'cacheAge'     => $cacheAge,
             'weekSchedule' => $weekSchedule,
+            'pastWeeks'    => $pastWeeks,
             'minutesDone'  => $minutesDone,
-            'hasHard'      => $hasHard,
-            'hasLong'      => $hasLong,
+            'weeklyTarget' => $weeklyTarget,
             'colors'       => self::BADGE_COLORS,
             'settings'     => $settings,
         ]);
+    }
+
+    /** Build $count past calendar weeks (most recent first). */
+    private function buildPastWeeks(array $allRides, string $thisWeekStart, int $count): array
+    {
+        $rideByDate = [];
+        foreach ($allRides as $r) $rideByDate[$r['date']] = $r;
+
+        $weeks = [];
+        for ($i = 1; $i <= $count; $i++) {
+            $weekStart = date('Y-m-d', strtotime("$thisWeekStart -" . (7 * $i) . " days"));
+            $days      = [];
+            $total     = 0.0;
+            for ($j = 0; $j < 7; $j++) {
+                $date = date('Y-m-d', strtotime("$weekStart +$j days"));
+                $ride = $rideByDate[$date] ?? null;
+                if ($ride) $total += $ride['moving_time'] / 60;
+                $days[] = ['date' => $date, 'dow' => $j, 'ride' => $ride];
+            }
+            $weeks[] = [
+                'start' => $weekStart,
+                'end'   => date('Y-m-d', strtotime("$weekStart +6 days")),
+                'days'  => $days,
+                'total' => (int) round($total),
+            ];
+        }
+        return $weeks;
     }
 
     private function settings(): void
@@ -167,18 +191,5 @@ class Controller
         $rides = fetchRides($accessToken, 21, $settings);
         file_put_contents($this->cacheFile(), json_encode(['ts' => time(), 'rides' => $rides]));
         return [$rides, 0];
-    }
-
-    /** Adds _types key to each ride in place. */
-    private function classifyRides(array &$rides): void
-    {
-        foreach ($rides as &$r) {
-            $types = [];
-            if (detectLongRide([$r])) $types[] = 'long';
-            if (detectHardRide([$r])) $types[] = 'hard';
-            if (empty($types))        $types[] = 'easy';
-            $r['_types'] = $types;
-        }
-        unset($r);
     }
 }

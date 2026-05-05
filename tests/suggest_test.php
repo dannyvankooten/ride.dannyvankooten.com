@@ -23,11 +23,7 @@ function day(int $sec, bool $hasHard = false, bool $hasLong = false, ?string $da
     return $d;
 }
 
-function ago(int $days): string { return date('Y-m-d', strtotime("-$days days")); }
-function fwd(int $days): string { return date('Y-m-d', strtotime("+$days days")); }
-function today(): string        { return date('Y-m-d'); }
-
-// Base settings: all 7 days available, target = 300 min, factor = 1.5
+// All 7 days available, target = 300, factor = 1.5
 $s = [
     'target_minutes'   => 300,
     'long_ride_factor' => 1.5,
@@ -36,181 +32,261 @@ $s = [
     'max_heartrate'    => null,
 ];
 
+// Pin "today" to a known Monday so tests are independent of the day they run.
+$MON = '2026-01-05'; // Monday
+$SUN = '2026-01-11'; // following Sunday (today + 6)
+
 // ------------------------------------------------------------
-// 1. No rides last 7 days → effective=600
-//    Schedule: hard(0), long(1), easy(2-4), long(5), easy(6)
-//    Units = 1 + 2*1.5 + 4 = 8; base = 600/8 = 75; long = 113
+// 1. No past rides → spacing produces hard/long/easy×4/long
+//    Units = 1 + 4 + 2*1.5 = 8; base = 300/8 = 37.5; hard/easy = 38; long = 56
 // ------------------------------------------------------------
-echo "no rides last 7 days\n";
-$r = schedule([], $s);
+echo "no rides, target distributed across week\n";
+$r = schedule([], $s, $MON);
 check(count($r) === 7,                  '7 days returned');
-check($r[0]['date'] === today(),        'first day is today');
-check($r[0]['status'] === 'scheduled',  'today is scheduled');
-check($r[0]['type'] === 'hard',         'today gets hard');
-check($r[0]['duration'] === 75,         'hard duration 75 min');
-check($r[1]['type'] === 'long',         'day 1 gets long');
-check($r[1]['duration'] === 113,        'long duration 113 min');
-check($r[2]['type'] === 'easy',         'day 2 is easy');
-check($r[5]['type'] === 'long',         'day 5 gets long (4 days after day 1)');
+check($r[0]['date']     === $MON,       'first day is today');
+check($r[6]['date']     === $SUN,       'last day is today+6');
+check($r[0]['status']   === 'scheduled','today is scheduled');
+check($r[0]['type']     === 'hard',     'today gets hard');
+check($r[1]['type']     === 'long',     'tue gets long');
+check($r[2]['type']     === 'easy',     'wed easy');
+check($r[5]['type']     === 'easy',     'sat easy (only 4d since long)');
+check($r[6]['type']     === 'long',     'sun long (5d since tue long)');
+check($r[0]['duration'] === 38,         'hard 38 min (300/8 round)');
+check($r[1]['duration'] === 56,         'long 56 min (38*1.5 round)');
 
 // ------------------------------------------------------------
-// 2. Rode 150 min last week → effective=450
-//    base = 450/8 = 56.25 → 56; long = round(84.375) = 84
-// ------------------------------------------------------------
-echo "\nrode 150/300 last week\n";
-$r = schedule([day(9000, false, false, ago(3))], $s); // 150 min, 3 days ago
-check($r[0]['type'] === 'hard',  'hard assigned');
-check($r[0]['duration'] === 56,  'base 56 min');
-check($r[1]['type'] === 'long',  'long assigned');
-check($r[1]['duration'] === 84,  'long 84 min');
-
-// ------------------------------------------------------------
-// 3. Rode 360 min last week → deficit clamped to -60 → effective=240
-//    base = 240/8 = 30; long = 45
-// ------------------------------------------------------------
-echo "\nrode 360/300 last week (credit capped at 20%)\n";
-$r = schedule([day(21600, false, false, ago(3))], $s);
-check($r[0]['duration'] === 30, 'base 30 min (credit capped)');
-check($r[1]['duration'] === 45, 'long 45 min');
-
-// ------------------------------------------------------------
-// 4. Rode 500 min last week → same credit cap as #3
-// ------------------------------------------------------------
-echo "\nrode 500/300 last week (still capped at -60)\n";
-$r = schedule([day(30000, false, false, ago(3))], $s);
-check($r[0]['duration'] === 30, 'base still 30 min');
-check($r[1]['duration'] === 45, 'long still 45 min');
-
-// ------------------------------------------------------------
-// 5. Hard done today → no further hards (last hard < 7 days);
-//    long still scheduled (lastLong=null)
+// 2. Hard done today → no further hards (min 7d); longs still scheduled
 // ------------------------------------------------------------
 echo "\nhard done today\n";
-$r = schedule([day(4800, true, false, today())], $s);
+$r = schedule([day(4800, true, false, $MON)], $s, $MON);
 check($r[0]['status'] === 'completed', 'today is completed');
 $sched = array_column(array_filter($r, fn($d) => $d['status'] === 'scheduled'), 'type');
 check(!in_array('hard', $sched), 'no hard scheduled (last hard < 7 days ago)');
 check(in_array('long', $sched),  'long still scheduled');
 
 // ------------------------------------------------------------
-// 6. Long done today → hard scheduled tomorrow; long can repeat after 4 days
-//    Schedule: completed-long, hard, easy, easy, long, easy, easy
+// 3. Long done today → hard tomorrow; long again at day 5 (Sat)
 // ------------------------------------------------------------
 echo "\nlong done today\n";
-$r = schedule([day(6000, false, true, today())], $s);
+$r = schedule([day(6000, false, true, $MON)], $s, $MON);
 check($r[0]['status'] === 'completed', 'today is completed');
-check($r[1]['type'] === 'hard',        'hard on tomorrow');
-check($r[4]['type'] === 'long',        'long on day 4 (4 days after today)');
+check($r[1]['type']   === 'hard',      'tue gets hard (no past hard)');
+check($r[5]['type']   === 'long',      'sat (day 5) gets long again');
 
 // ------------------------------------------------------------
-// 7. Both hard and long done today → no hard for 7 days;
-//    long can repeat at day 4
+// 4. Hard+long done today → no hard for 7 days; long again at day 5
 // ------------------------------------------------------------
-echo "\nboth hard and long done today\n";
-$r = schedule([day(6000, true, true, today())], $s);
+echo "\nhard+long done today\n";
+$r = schedule([day(6000, true, true, $MON)], $s, $MON);
 check($r[0]['status'] === 'completed', 'today is completed');
 $sched = array_column(array_filter($r, fn($d) => $d['status'] === 'scheduled'), 'type');
 check(!in_array('hard', $sched), 'no hard scheduled (< 7 days)');
-check($r[4]['type'] === 'long',  'long on day 4');
+check($r[5]['type']   === 'long', 'long on day 5');
 
 // ------------------------------------------------------------
-// 7b. Hard+long yesterday → no hard until day 6 (7 days after yesterday);
-//     long appears at day 3 (4 days after yesterday)
+// 5. Hard+long yesterday → no hard until day 6 (7d after); long at day 4 (5d after)
 // ------------------------------------------------------------
 echo "\nhard+long yesterday\n";
-$r = schedule([day(4800, true, true, ago(1))], $s);
-check($r[0]['type'] === 'easy',  'today is easy (hard+long yesterday)');
-check($r[3]['type'] === 'long',  'long on day 3 (4 days after yesterday)');
-check($r[6]['type'] === 'hard',  'hard on day 6 (7 days after yesterday)');
+$r = schedule([day(4800, true, true, '2026-01-04')], $s, $MON);
+check($r[0]['type'] === 'easy',  'today is easy (hard+long 1 day ago)');
+check($r[4]['type'] === 'long',  'long on day 4 (5 days after sun)');
+check($r[6]['type'] === 'hard',  'hard on day 6 (7 days after sun)');
 
 // ------------------------------------------------------------
-// 7c. Hard+long 7 days ago → outside spacing windows
+// 6. Hard+long 7 days ago → outside spacing windows
 // ------------------------------------------------------------
 echo "\nhard+long 7 days ago\n";
-$r = schedule([day(4800, true, true, ago(7))], $s);
-check($r[0]['type'] === 'hard',  'hard available today (7 days since last hard)');
-$types = array_column($r, 'type');
-check(in_array('long', $types),  'long still scheduled');
+$r = schedule([day(4800, true, true, '2025-12-29')], $s, $MON);
+check($r[0]['type'] === 'hard', 'hard available today (7d since last hard)');
 
 // ------------------------------------------------------------
-// 8. Rode today (easy) → today excluded; hard tomorrow, long day 2
+// 7. Rode today (easy) → today completed; hard tomorrow, long day 2
 // ------------------------------------------------------------
 echo "\nrode today (easy)\n";
-$r = schedule([day(3600, false, false, today())], $s); // 60 min easy
-check($r[0]['status'] === 'completed', 'today is completed');
-check($r[0]['duration'] === 60,        'today duration 60 min');
-check($r[1]['type'] === 'hard',        'hard on tomorrow');
-check($r[2]['type'] === 'long',        'long on day 2');
+$r = schedule([day(3600, false, false, $MON)], $s, $MON);
+check($r[0]['status']   === 'completed', 'today is completed');
+check($r[0]['duration'] === 60,          'today duration 60 min');
+check($r[1]['type']     === 'hard',      'hard on tomorrow');
+check($r[2]['type']     === 'long',      'long on day 2');
 
 // ------------------------------------------------------------
-// 9. Only 1 available day → hard takes priority
+// 8. Single available day → only 1 scheduled slot, gets hard
 // ------------------------------------------------------------
-echo "\nonly 1 available day\n";
-$sOne = array_merge($s, ['available_days' => [dayOfWeek(fwd(3))]]);
-$r    = schedule([], $sOne);
+echo "\nonly 1 available day (Wednesday)\n";
+$sOne = array_merge($s, ['available_days' => [2]]);
+$r    = schedule([], $sOne, $MON);
 $scheduled = array_filter($r, fn($d) => $d['status'] === 'scheduled');
 check(count($scheduled) === 1,                        'exactly 1 scheduled slot');
 check(array_values($scheduled)[0]['type'] === 'hard', 'single slot gets hard');
 
 // ------------------------------------------------------------
-// 10. No available days → all 7 days are rest
+// 9. No available days → all rest
 // ------------------------------------------------------------
 echo "\nno available days\n";
 $sNone = array_merge($s, ['available_days' => []]);
-$r     = schedule([], $sNone);
+$r     = schedule([], $sNone, $MON);
 $types = array_unique(array_column($r, 'type'));
 check($types === ['rest'], 'all days are rest');
 
 // ------------------------------------------------------------
-// 11. Unavailable day in window → that day is rest
+// 10. Display always Mon–Sun: mid-week today still shows the full week
+//     with past days as rest/completed and future days as scheduled.
 // ------------------------------------------------------------
-echo "\nunavailable day is rest\n";
-$sMon = array_merge($s, ['available_days' => [0]]);
-$r    = schedule([], $sMon);
-foreach ($r as $day) {
-    if ($day['dow'] !== 0) {
-        check($day['status'] === 'rest', 'non-Mon day is rest (dow=' . $day['dow'] . ')');
-        break;
-    }
-}
+echo "\ndisplay window is Mon–Sun regardless of today\n";
+$WED  = '2026-01-07'; // Wednesday
+$rWed = schedule([], $s, $WED);
+check(count($rWed) === 7,                       '7 days returned');
+check($rWed[0]['date']   === $MON,              'first day is Monday of current week');
+check($rWed[6]['date']   === $SUN,              'last day is Sunday of current week');
+check($rWed[0]['status'] === 'rest',            'past Mon (no ride) shows as rest');
+check($rWed[1]['status'] === 'rest',            'past Tue (no ride) shows as rest');
+check($rWed[2]['status'] === 'scheduled',       'today (Wed) is scheduled');
 
 // ------------------------------------------------------------
-// 12. All 7 result entries have required keys and dates are today..+6
+// 11. All entries have required keys
 // ------------------------------------------------------------
-echo "\nschedule covers today through +6 days\n";
-$r    = schedule([], $s);
-$keys = ['date', 'dow', 'status', 'type', 'duration', 'description'];
-check($r[0]['date'] === today(), 'first entry is today');
-check($r[6]['date'] === fwd(6),  'last entry is today+6');
+echo "\nall entries have required keys\n";
+$keys    = ['date', 'dow', 'status', 'type', 'duration', 'description'];
+$r       = schedule([], $s, $MON);
 $allKeys = array_reduce($r, fn($ok, $d) => $ok && !array_diff($keys, array_keys($d)), true);
 check($allKeys, 'all entries have required keys');
 
 // ------------------------------------------------------------
-// 13. Today's hard ride shows as completed with type=hard
+// 12. Today's hard ride shows as completed with correct duration
 // ------------------------------------------------------------
 echo "\ntoday's hard ride shows as completed\n";
-$r = schedule([day(4800, true, false, today())], $s);
-check($r[0]['status'] === 'completed', 'today status is completed');
-check($r[0]['type']   === 'hard',      'today type is hard');
-check($r[0]['duration'] === 80,        'today duration 80 min');
+$r = schedule([day(4800, true, false, $MON)], $s, $MON);
+check($r[0]['status']   === 'completed', 'today status is completed');
+check($r[0]['type']     === 'hard',      'today type is hard');
+check($r[0]['duration'] === 80,          'today duration 80 min');
 
 // ------------------------------------------------------------
-// 14. daysBetween: date-only, DST-safe, ignores time component
+// 13. Stability invariant: rest day → next day produces the same plan
+//     for every shared future date when no new rides occurred.
+// ------------------------------------------------------------
+echo "\nregression: rest day → next day plan is stable for shared dates\n";
+$sUser = [
+    'target_minutes'   => 150,
+    'long_ride_factor' => 1.5,
+    'available_days'   => [1, 3, 5, 6], // Tu, Th, Sa, Su
+    'ftp'              => null,
+    'max_heartrate'    => null,
+];
+$past = [
+    day(3600, false, false, '2026-04-29'), // Wed, 60 min easy
+    day(3600, false, false, '2026-05-03'), // Sun, 60 min easy
+];
+$mondayView  = schedule($past, $sUser, '2026-05-04'); // Monday, rest day
+$tuesdayView = schedule($past, $sUser, '2026-05-05'); // Tuesday, riding day
+$byMon = array_column($mondayView,  null, 'date');
+$byTue = array_column($tuesdayView, null, 'date');
+foreach (['2026-05-05', '2026-05-07', '2026-05-09', '2026-05-10'] as $d) {
+    check(
+        $byMon[$d]['type']     === $byTue[$d]['type']
+     && $byMon[$d]['duration'] === $byTue[$d]['duration'],
+        "$d: same type+duration in mon and tue view"
+    );
+}
+
+// ------------------------------------------------------------
+// 14. Calendar-week deficit: ride done earlier in the week reduces
+//     the remaining target distributed across remaining ride days.
+// ------------------------------------------------------------
+echo "\ncalendar-week deficit subtracts done minutes\n";
+// Past: Tuesday this week, 60 min easy (no hard/long flag).
+// View from Wed (rest day for this user).
+$past = [day(3600, false, false, '2026-05-05')]; // Tue 60 min
+$r    = schedule($past, $sUser, '2026-05-06');   // Wed
+// Remaining riding days this week: Thu, Sat, Sun. With no past hard/long,
+// plan is Thu=hard, Sat=long, Sun=easy.
+// done = 60, remaining = 90, units = 1 + 1.5 + 1 = 3.5, base = 90/3.5 ≈ 25.71
+// hard/easy = 26, long = round(25.71 * 1.5) = 39
+$byDate = array_column($r, null, 'date');
+check($byDate['2026-05-07']['type']     === 'hard', 'Thu hard (no past hard ride)');
+check($byDate['2026-05-07']['duration'] === 26,     'Thu hard duration 26 (90/3.5)');
+check($byDate['2026-05-09']['type']     === 'long', 'Sat long');
+check($byDate['2026-05-09']['duration'] === 39,     'Sat long duration 39 (90/3.5*1.5)');
+check($byDate['2026-05-10']['duration'] === 26,     'Sun easy duration 26 (90/3.5)');
+
+// ------------------------------------------------------------
+// 14b. Missed riding day redistributes minutes upward
+// ------------------------------------------------------------
+echo "\nmissed riding day → remaining days scale up\n";
+// Tue 05-05 was a riding day. Compare:
+//   miss: no ride happened → done=0, plan Thu/Sat/Sun absorbs full 150
+//   with: 60 min ride happened → done=60, remaining=90 spread over 3 days
+$miss   = schedule([], $sUser, '2026-05-06');                                   // Wed view, Tue missed
+$with   = schedule([day(3600, false, false, '2026-05-05')], $sUser, '2026-05-06');
+$missBy = array_column($miss, null, 'date');
+$withBy = array_column($with, null, 'date');
+// miss: 150/3.5 = 42.86 → hard=43, long=64, easy=43.  Sum = 150
+// with: 90/3.5  = 25.71 → hard=26, long=39, easy=26.  Sum ≈ 91
+check($missBy['2026-05-07']['duration'] === 43, 'missed: Thu hard 43 (150/3.5)');
+check($missBy['2026-05-09']['duration'] === 64, 'missed: Sat long 64');
+check($missBy['2026-05-10']['duration'] === 43, 'missed: Sun easy 43');
+check($missBy['2026-05-07']['duration'] > $withBy['2026-05-07']['duration'],
+      'missed Tue → Thu duration > with-Tue-ride scenario');
+check(
+    $missBy['2026-05-07']['duration']
+  + $missBy['2026-05-09']['duration']
+  + $missBy['2026-05-10']['duration'] === 150,
+    'missed: remaining 3 days sum to weekly target'
+);
+
+// ------------------------------------------------------------
+// 14c. Last week's surplus reduces this week's target (carry-over)
+// ------------------------------------------------------------
+echo "\nlast week's surplus rolls forward as a target reduction\n";
+$sCarry = [
+    'target_minutes'   => 210,
+    'long_ride_factor' => 1.5,
+    'available_days'   => [1, 3, 5, 6],
+    'ftp'              => null,
+    'max_heartrate'    => null,
+];
+// Last week Thu 04-30: 240 min easy → overshoot 30 → 50% carry = 15
+// effective = 210 − 15 = 195; plan total ≈ 195 (within rounding)
+$past = [day(14400, false, false, '2026-04-30')];
+$r    = schedule($past, $sCarry, '2026-05-04'); // Mon 05-04
+$total = array_sum(array_map(fn($d) => $d['duration'] ?? 0, $r));
+check($total >= 193 && $total <= 196, "this week totals ≈195 (210 − half of 30 surplus, got $total)");
+
+// Under-riding last week does NOT roll forward (no deficit accumulation)
+$rUnder = schedule([day(3600, false, false, '2026-04-30')], $sCarry, '2026-05-04'); // 60 min
+$rZero  = schedule([], $sCarry, '2026-05-04');                                       // no rides
+$tUnder = array_sum(array_map(fn($d) => $d['duration'] ?? 0, $rUnder));
+$tZero  = array_sum(array_map(fn($d) => $d['duration'] ?? 0, $rZero));
+check($tUnder === $tZero, 'under-rode last week → same total as no past rides (no deficit carry)');
+
+// Massive surplus is capped at 50% of target (so this week still has a meaningful plan)
+$rHuge  = schedule([day(60000, false, false, '2026-04-30')], $sCarry, '2026-05-04'); // 1000 min last week
+$tHuge  = array_sum(array_map(fn($d) => $d['duration'] ?? 0, $rHuge));
+// Surplus uncapped = 790; capped to 105 (50% of 210). Effective = 105. Total ≈ 105.
+check($tHuge >= 104 && $tHuge <= 106, "massive overshoot capped at 50% (total ≈ 105, got $tHuge)");
+
+// ------------------------------------------------------------
+// 15. daysBetween: date-only, DST-safe, ignores time component
 // ------------------------------------------------------------
 echo "\ndaysBetween\n";
-check(daysBetween('2026-05-03', '2026-05-04') === 1, 'consecutive days');
-check(daysBetween('2026-05-04', '2026-05-04') === 0, 'same day');
-check(daysBetween('2026-05-04', '2026-05-11') === 7, '7-day gap');
+check(daysBetween('2026-05-03', '2026-05-04') === 1,  'consecutive days');
+check(daysBetween('2026-05-04', '2026-05-04') === 0,  'same day');
+check(daysBetween('2026-05-04', '2026-05-11') === 7,  '7-day gap');
 check(daysBetween('2026-05-04', '2026-05-03') === -1, 'reverse direction');
-// EU DST transitions: end 2026-10-25 (25h day), start 2026-03-29 (23h day)
-check(daysBetween('2026-10-24', '2026-10-26') === 2, 'across DST end');
-check(daysBetween('2026-03-28', '2026-03-30') === 2, 'across DST start');
-// Defensive: any time component on the input is ignored
+check(daysBetween('2026-10-24', '2026-10-26') === 2,  'across DST end');
+check(daysBetween('2026-03-28', '2026-03-30') === 2,  'across DST start');
 check(daysBetween('2026-05-03 21:00:00', '2026-05-04 06:00:00') === 1,
       'evening yesterday → morning today === 1');
 
 // ------------------------------------------------------------
-// Summary
+// 16. Calendar-week helpers
+// ------------------------------------------------------------
+echo "\ncalendar-week helpers\n";
+check(startOfCalendarWeek('2026-05-05') === '2026-05-04', 'Tue → Mon (this week)');
+check(startOfCalendarWeek('2026-05-04') === '2026-05-04', 'Mon → Mon (same)');
+check(startOfCalendarWeek('2026-05-10') === '2026-05-04', 'Sun → Mon (start of week)');
+check(endOfCalendarWeek  ('2026-05-05') === '2026-05-10', 'Tue → Sun');
+check(endOfCalendarWeek  ('2026-05-10') === '2026-05-10', 'Sun → Sun');
+
 // ------------------------------------------------------------
 echo "\n$pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

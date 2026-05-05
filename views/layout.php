@@ -23,6 +23,7 @@
 <?= $pageStyle ?>
 </style>
 <?php endif; ?>
+<link rel="icon" type="image/svg+xml" href="/logo.svg">
 </head>
 <body>
 <?= $content ?>

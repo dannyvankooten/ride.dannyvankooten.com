@@ -14,9 +14,9 @@ function tokensFile(): string {
 const SETTINGS_DEFAULTS = [
     'target_minutes'   => 150,
     'long_ride_factor' => 1.5,
-    'ftp'              => null,
-    'max_heartrate'    => null,
-    'available_days'   => [0, 1, 2, 3, 4], // Mon–Fri
+    'ftp'              => 200,
+    'max_heartrate'    => 180,
+    'available_days'   => [1, 3, 5, 6], // Tu, Th, Sa, Su
 ];
 
 function settingsFile(): string { return varDir() . 'settings.json'; }

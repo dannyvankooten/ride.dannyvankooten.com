@@ -105,6 +105,7 @@ function fetchRides(string $accessToken, int $days, array $settings): array {
         if (!isset($byDay[$date])) {
             $byDay[$date] = [
                 'date'         => $date,
+                'ids'          => [],
                 'names'        => [],
                 'moving_time'  => 0,
                 'has_hard'     => false,
@@ -115,6 +116,7 @@ function fetchRides(string $accessToken, int $days, array $settings): array {
             ];
         }
 
+        $byDay[$date]['ids'][]        = (int) $ride['id'];
         $byDay[$date]['names'][]      = $ride['name'];
         $byDay[$date]['moving_time'] += (int) ($ride['moving_time'] ?? 0);
 

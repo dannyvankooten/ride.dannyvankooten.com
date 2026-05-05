@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Build a 7-day workout schedule starting from today.
+ * Build the current calendar week's workout schedule (Monday–Sunday).
  *
  * Each returned element covers one calendar day and has keys:
  *   date        => 'Y-m-d'
@@ -12,44 +12,35 @@
  *   description => string
  *
  * Algorithm:
- *   1. Compute clamped surplus/deficit from the past 7 days.
- *      effective_target = target_minutes + deficit, with deficit clamped at ±20%.
- *   2. Walk each available day in order. Spacing rules against the most recent
- *      hard/long ride (past or earlier in the window):
+ *   1. Walk each available day from today through Sunday. Spacing rules
+ *      against the most recent hard/long ride (past or planned earlier in
+ *      the walk):
  *        - hard if last hard ≥ 7 days ago
- *        - else long if last long ≥ 4 days ago
+ *        - else long if last long ≥ 5 days ago
  *        - else easy
- *   3. Distribute remaining minutes across scheduled days.
- *      Long rides count as long_ride_factor× the base duration.
+ *   2. Carry over any *surplus* from last calendar week (Mon–Sun): if last
+ *      week's total exceeded target_minutes, this week's effective target is
+ *      reduced by the overshoot. Under-riding last week does not roll forward.
+ *   3. Distribute (effective_target − minutes done so far this calendar week)
+ *      across the remaining planned days. Long rides count as
+ *      long_ride_factor× the base duration. Missed riding days fall out of
+ *      the divisor automatically, so the remaining days scale up to meet
+ *      the weekly target.
  */
-function schedule(array $pastRides, array $settings): array {
-    $today         = date('Y-m-d');
+function schedule(array $pastRides, array $settings, ?string $today = null): array {
+    $today         = $today ?? date('Y-m-d');
     $factor        = $settings['long_ride_factor'];
     $availableDays = $settings['available_days'] ?? [0, 1, 2, 3, 4];
-
-    $window = [];
-    for ($i = 0; $i < 7; $i++) {
-        $window[] = date('Y-m-d', strtotime("+$i days"));
-    }
 
     $rideByDate = [];
     foreach ($pastRides as $r) {
         $rideByDate[$r['date']] = $r;
     }
 
-    // Clamped surplus/deficit from the past 7 days
-    $last7Start   = date('Y-m-d', strtotime('-7 days'));
-    $minutesLast7 = 0.0;
-    foreach ($pastRides as $r) {
-        if ($r['date'] >= $last7Start && $r['date'] < $today) {
-            $minutesLast7 += $r['moving_time'] / 60;
-        }
-    }
-    $creditCap       = (int) round($settings['target_minutes'] * 0.20);
-    $deficit         = max(-$creditCap, min($settings['target_minutes'], $settings['target_minutes'] - $minutesLast7));
-    $effectiveTarget = $settings['target_minutes'] + $deficit;
+    $weekStart = startOfCalendarWeek($today);
+    $weekEnd   = endOfCalendarWeek($today);
 
-    // Most recent hard/long from past rides drives spacing checks
+    // Seed spacing tracker from past rides only (anything before today)
     $lastHardDate = null;
     $lastLongDate = null;
     foreach ($pastRides as $r) {
@@ -62,98 +53,87 @@ function schedule(array $pastRides, array $settings): array {
         }
     }
 
-    // First pass: pick a type for each available day in the window
-    $types = [];
-    foreach ($window as $date) {
-        if (isset($rideByDate[$date])) {
-            $ride = $rideByDate[$date];
-            if ($ride['has_hard'] ?? false) $lastHardDate = $date;
-            if ($ride['has_long'] ?? false) $lastLongDate = $date;
+    // Pass 1: walk today → Sunday, assign type per riding day, updating the
+    // spacing tracker so planned rides influence later decisions.
+    $plannedTypes = [];
+    for ($d = $today; $d <= $weekEnd; $d = date('Y-m-d', strtotime("$d +1 day"))) {
+        if (isset($rideByDate[$d])) {
+            $r = $rideByDate[$d];
+            if ($r['has_hard'] ?? false) $lastHardDate = $d;
+            if ($r['has_long'] ?? false) $lastLongDate = $d;
             continue;
         }
-        if (!in_array(dayOfWeek($date), $availableDays, true)) {
-            continue;
-        }
+        if (!in_array(dayOfWeek($d), $availableDays, true)) continue;
 
-        $canHard = $lastHardDate === null || daysBetween($lastHardDate, $date) >= 7;
-        $canLong = $lastLongDate === null || daysBetween($lastLongDate, $date) >= 4;
-
+        $canHard = $lastHardDate === null || daysBetween($lastHardDate, $d) >= 7;
+        $canLong = $lastLongDate === null || daysBetween($lastLongDate, $d) >= 5;
         if ($canHard) {
-            $types[$date] = 'hard';
-            $lastHardDate = $date;
+            $plannedTypes[$d] = 'hard';
+            $lastHardDate = $d;
         } elseif ($canLong) {
-            $types[$date] = 'long';
-            $lastLongDate = $date;
+            $plannedTypes[$d] = 'long';
+            $lastLongDate = $d;
         } else {
-            $types[$date] = 'easy';
+            $plannedTypes[$d] = 'easy';
         }
     }
 
-    // Second pass: distribute remaining minutes; long counts as factor× base
-    $remaining = $effectiveTarget;
-    foreach ($window as $date) {
-        if (isset($rideByDate[$date])) {
-            $remaining -= $rideByDate[$date]['moving_time'] / 60;
+    // Pass 2: distribute (effective_target − done_this_week) across this
+    // week's planned days. Missed past riding days have already fallen out
+    // of the planning walk, so the remaining days absorb their share
+    // automatically.
+    $effectiveTarget = effectiveTarget($pastRides, $settings, $today);
+
+    $done = 0.0;
+    foreach ($pastRides as $r) {
+        if ($r['date'] >= $weekStart && $r['date'] <= $today) {
+            $done += $r['moving_time'] / 60;
         }
     }
-    $remaining = max(0, $remaining);
-
-    $longs = $others = 0;
-    foreach ($types as $type) {
-        if ($type === 'long') $longs++;
-        else $others++;
+    $remaining = max(0, $effectiveTarget - $done);
+    $units     = 0;
+    foreach ($plannedTypes as $t) {
+        $units += ($t === 'long') ? $factor : 1;
     }
-    $totalUnits = $longs * $factor + $others;
-    $base       = $totalUnits > 0 ? $remaining / $totalUnits : 0;
+    $base = $units > 0 ? $remaining / $units : 0;
 
-    $slotAssignments = [];
-    foreach ($types as $date => $type) {
-        $duration = ($type === 'long')
-            ? (int) round($base * $factor)
-            : (int) round($base);
-        $slotAssignments[$date] = ['type' => $type, 'duration' => $duration];
+    $durations = [];
+    foreach ($plannedTypes as $d => $t) {
+        $durations[$d] = (int) round(($t === 'long') ? $base * $factor : $base);
     }
 
-    // Build the 7-element result
+    // Build the display window: Monday through Sunday of the current week.
     $result = [];
-    foreach ($window as $date) {
-        $dow          = dayOfWeek($date);
-        $existingRide = $rideByDate[$date] ?? null;
-        $isPast       = ($date < $today);
+    for ($d = $weekStart; $d <= $weekEnd; $d = date('Y-m-d', strtotime("$d +1 day"))) {
+        $dow  = dayOfWeek($d);
+        $ride = $rideByDate[$d] ?? null;
+        $past = ($d < $today);
 
-        if ($existingRide !== null && ($isPast || $date === $today)) {
-            $type = ($existingRide['has_hard'] ?? false) ? 'hard'
-                  : (($existingRide['has_long'] ?? false) ? 'long' : 'easy');
+        if ($ride !== null && ($past || $d === $today)) {
+            $type = ($ride['has_hard'] ?? false) ? 'hard'
+                  : (($ride['has_long'] ?? false) ? 'long' : 'easy');
             $result[] = [
-                'date'        => $date,
+                'date'        => $d,
                 'dow'         => $dow,
                 'status'      => 'completed',
                 'type'        => $type,
-                'duration'    => (int) round($existingRide['moving_time'] / 60),
+                'duration'    => (int) round($ride['moving_time'] / 60),
                 'description' => rideDescription($type),
+                'ids'         => $ride['ids'] ?? [],
             ];
-        } elseif ($isPast) {
+        } elseif (isset($plannedTypes[$d])) {
+            $t = $plannedTypes[$d];
             $result[] = [
-                'date'        => $date,
-                'dow'         => $dow,
-                'status'      => 'rest',
-                'type'        => 'rest',
-                'duration'    => null,
-                'description' => rideDescription('rest'),
-            ];
-        } elseif (isset($slotAssignments[$date])) {
-            $a = $slotAssignments[$date];
-            $result[] = [
-                'date'        => $date,
+                'date'        => $d,
                 'dow'         => $dow,
                 'status'      => 'scheduled',
-                'type'        => $a['type'],
-                'duration'    => $a['duration'],
-                'description' => rideDescription($a['type']),
+                'type'        => $t,
+                'duration'    => $durations[$d],
+                'description' => rideDescription($t),
             ];
         } else {
             $result[] = [
-                'date'        => $date,
+                'date'        => $d,
                 'dow'         => $dow,
                 'status'      => 'rest',
                 'type'        => 'rest',
@@ -162,12 +142,46 @@ function schedule(array $pastRides, array $settings): array {
             ];
         }
     }
-
     return $result;
+}
+
+/**
+ * This week's target after subtracting last calendar week's surplus.
+ *
+ * If last week's total exceeded target_minutes, half of the overshoot rolls
+ * into this week as a target reduction. The carry is capped at 50% of target,
+ * so even a very heavy week still leaves a meaningful plan. Under-riding does
+ * not roll forward.
+ */
+function effectiveTarget(array $pastRides, array $settings, ?string $today = null): int {
+    $today  = $today ?? date('Y-m-d');
+    $target = $settings['target_minutes'];
+
+    $weekStart     = startOfCalendarWeek($today);
+    $lastWeekStart = date('Y-m-d', strtotime("$weekStart -7 days"));
+    $lastWeekEnd   = date('Y-m-d', strtotime("$weekStart -1 day"));
+
+    $lastWeekDone = 0.0;
+    foreach ($pastRides as $r) {
+        if ($r['date'] >= $lastWeekStart && $r['date'] <= $lastWeekEnd) {
+            $lastWeekDone += $r['moving_time'] / 60;
+        }
+    }
+    $surplus = min(max(0, 0.50 * ($lastWeekDone - $target)), $target * 0.5);
+    return (int) round($target - $surplus);
 }
 
 function dayOfWeek(string $date): int {
     return (int) date('N', strtotime($date)) - 1; // 0=Mon … 6=Sun
+}
+
+function startOfCalendarWeek(string $date): string {
+    $dow = dayOfWeek($date);
+    return date('Y-m-d', strtotime("$date -$dow days"));
+}
+
+function endOfCalendarWeek(string $date): string {
+    return date('Y-m-d', strtotime(startOfCalendarWeek($date) . ' +6 days'));
 }
 
 function daysBetween(string $d1, string $d2): int {
