@@ -50,9 +50,9 @@ $pageStyle = <<<CSS
     .page-header { align-items: flex-start; flex-wrap: wrap; gap: 8px 12px; }
     .page-header__links { margin-left: 0; width: 100%; justify-content: flex-start; }
     .week-header { gap: 12px; }
-    .schedule { grid-template-columns: 1fr; gap: 6px; margin-bottom: 28px; }
+    .schedule { display: flex; flex-direction: column-reverse; gap: 6px; margin-bottom: 28px; }
     .schedule__day,
-    a.schedule__day { display: grid; grid-template-columns: 42px 54px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; padding: 10px 12px; text-align: left; }
+    a.schedule__day { display: grid; width: 100%; box-sizing: border-box; grid-template-columns: 42px 54px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; padding: 10px 12px; text-align: left; }
     .schedule__dow,
     .schedule__date,
     .schedule__badge { margin-bottom: 0; }
