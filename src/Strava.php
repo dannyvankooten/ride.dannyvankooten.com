@@ -54,7 +54,13 @@ function stravaTokenRequest(array $params): array {
     if ($status !== 200) {
         throw new RuntimeException("Strava token request failed (HTTP $status): $response");
     }
-    return json_decode($response, true);
+
+    $data = json_decode($response, true);
+    if (!is_array($data)) {
+        throw new RuntimeException("Strava token request returned invalid JSON: $response");
+    }
+
+    return $data;
 }
 
 function getValidTokens(): ?array {
@@ -69,13 +75,12 @@ function getValidTokens(): ?array {
 }
 
 /**
- * Fetch rides from the last 7 days, classify each one, and group by calendar day.
+ * Fetch rides from a specific UNIX timestamp, classify each one, and group by calendar day.
  * Returns one entry per day: date, names, moving_time, has_hard, has_long.
  */
-function fetchRides(string $accessToken, int $days, array $settings): array {
-    $after = strtotime("-{$days} days");
+function fetchRides(string $accessToken, int $afterTimestamp, array $settings): array {
     $url   = 'https://www.strava.com/api/v3/athlete/activities?' . http_build_query([
-        'after'    => $after,
+        'after'    => $afterTimestamp,
         'per_page' => 50,
     ]);
 
@@ -93,6 +98,9 @@ function fetchRides(string $accessToken, int $days, array $settings): array {
     }
 
     $activities = json_decode($response, true);
+    if (!is_array($activities)) {
+        throw new RuntimeException("Strava activities request returned invalid JSON: $response");
+    }
 
     // Filter to bike rides only
     $rides = array_filter($activities, fn($a) => in_array($a['type'] ?? '', ['Ride', 'VirtualRide'], true));
@@ -227,6 +235,10 @@ function fetchActivityStream(string $accessToken, int $activityId, string $key):
     }
 
     $body = json_decode($response, true);
+    if (!is_array($body)) {
+        return null;
+    }
+
     return isset($body[$key]['data']) && is_array($body[$key]['data'])
         ? $body[$key]['data']
         : null;

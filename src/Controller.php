@@ -188,7 +188,10 @@ class Controller
             }
         }
 
-        $rides = fetchRides($accessToken, 21, $settings);
+        $weekStart = startOfCalendarWeek(date('Y-m-d'));
+        $after = strtotime("$weekStart -21 days");
+        
+        $rides = fetchRides($accessToken, $after, $settings);
         file_put_contents($this->cacheFile(), json_encode(['ts' => time(), 'rides' => $rides]));
         return [$rides, 0];
     }
